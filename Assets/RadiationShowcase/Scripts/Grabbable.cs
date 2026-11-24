@@ -14,6 +14,9 @@ namespace RadiationShowcase
         public Color glowColor = new Color(1f, 0.8f, 0.2f);
         [Tooltip("Pulses to show 'use me now'")]
         public bool highlighted;
+        [Tooltip("Optional: where and how the hand holds this item. On grab the item snaps so this point sits in " +
+                 "the hand, its blue axis (Z) along the hand's pointing direction and its green axis (Y) up.")]
+        public Transform gripPoint;
 
         protected Rigidbody rb;
         protected Transform holder;
@@ -46,6 +49,17 @@ namespace RadiationShowcase
         {
             holder = hand;
             if (rb != null) rb.isKinematic = true;
+
+            if (gripPoint != null)
+            {
+                // always held the right way round: the grip point lines up with the hand
+                Quaternion gripLocalRot = Quaternion.Inverse(transform.rotation) * gripPoint.rotation;
+                Vector3 gripLocalPos = Quaternion.Inverse(transform.rotation) * (gripPoint.position - transform.position);
+                rotOffset = Quaternion.Inverse(gripLocalRot);
+                posOffset = -(rotOffset * gripLocalPos);
+                return;
+            }
+
             posOffset = snapToHand ? Vector3.zero : hand.InverseTransformPoint(transform.position);
             rotOffset = Quaternion.Inverse(hand.rotation) * transform.rotation;
         }
@@ -68,16 +82,42 @@ namespace RadiationShowcase
             }
         }
 
+        /// <summary>Can this be pulled to the hand from a distance (Trigger + Grip)? Fixed things like levers can't.</summary>
+        public virtual bool CanForcePull => CanGrab && !IsHeld;
+
+        /// <summary>Freeze physics while the item flies to the hand.</summary>
+        public void BeginPull()
+        {
+            if (rb == null) return;
+            if (!rb.isKinematic) { rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+            rb.isKinematic = true;
+        }
+
+        /// <summary>Pull cancelled mid-air: let it fall again.</summary>
+        public void CancelPull()
+        {
+            if (rb != null && holder == null) rb.isKinematic = false;
+        }
+
         public virtual void ResetItem()
         {
             holder = null;
             gameObject.SetActive(true);
-            transform.SetPositionAndRotation(startPos, startRot);
             if (rb != null)
             {
-                rb.isKinematic = true; // stop velocity first
-                rb.isKinematic = startKinematic;
+                // stop it, then move the PHYSICS body too (an interpolated Rigidbody would drag the
+                // transform back to its old spot if only the transform were moved)
+                if (!rb.isKinematic)
+                {
+                    rb.linearVelocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
+                rb.isKinematic = true;
+                rb.position = startPos;
+                rb.rotation = startRot;
             }
+            transform.SetPositionAndRotation(startPos, startRot);
+            if (rb != null) rb.isKinematic = startKinematic;
         }
 
         protected virtual void Update()

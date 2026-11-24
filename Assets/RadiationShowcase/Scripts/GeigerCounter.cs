@@ -5,153 +5,157 @@ using UnityEngine.UI;
 namespace RadiationShowcase
 {
     /// <summary>
-    /// Hand-held Geiger counter.
-    /// Sound: real Geiger tubes click at RANDOM times (a Poisson process), not in a steady rhythm.
-    /// The click rate (CPS = counts per second) rises sharply as the probe gets closer to the source:
-    /// far away = a lone "tick... tick", close = a dense crackling buzz.
-    /// Clicks are generated sample-by-sample in OnAudioFilterRead, so even hundreds per second sound right.
+    /// Hand-held Geiger counter — the ONLY way to read radiation in the game.
+    /// Starts locked inside the glass emergency case; once the glass is broken, grab it (Grip) and hold it.
+    /// Display: ambient dose rate at the probe (real units), the player's accumulated body dose, a log-scale
+    /// needle and a click LED. Sound: random Poisson clicks generated sample-by-sample, denser near the leak.
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
-    public class GeigerCounter : MonoBehaviour
+    public class GeigerCounter : Grabbable
     {
-        [Header("References")]
+        [Header("Geiger")]
         public RadiationSource source;
-        public ShowcaseRig rig;
         [Tooltip("Where the radiation is measured (tip of the probe)")]
         public Transform probeTip;
+        [Tooltip("Locked inside the emergency case until the glass breaks")]
+        public bool locked = true;
+        public string actionId = "geiger";
 
-        [Header("Counting")]
-        [Tooltip("Natural background radiation: a few random clicks even far away")]
-        public float backgroundCps = 0.7f;
-        [Tooltip("Clicks per second right at the vent")]
-        public float maxCps = 450f;
-        [Tooltip("Higher = rate stays low longer, then shoots up near the source")]
-        public float falloffPower = 3f;
+        [Header("Clicks")]
+        [Tooltip("Natural background: a few random clicks even far from the leak")]
+        public float backgroundCps = 0.6f;
+        [Tooltip("Clicks per second right at the vent (the tube is saturated there)")]
+        public float maxCps = 700f;
+        [Tooltip("Lower = the click rate climbs earlier as you approach")]
+        public float cpsCurve = 0.35f;
         [Range(0f, 1f)] public float volume = 0.8f;
 
         [Header("Display")]
         public RectTransform needle;
-        public Text readout;
+        public Text rateText;
+        public Text doseText;
+        public Text alarmText;
         public Image led;
         public Color ledOn = new Color(1f, 0.15f, 0.1f);
         public Color ledOff = new Color(0.25f, 0.05f, 0.05f);
 
-        [Header("Holding pose")]
-        public Vector3 handOffset = new Vector3(0f, 0.035f, -0.11f); // strapped to the back of the left wrist
-        public Vector3 handEuler = new Vector3(0f, 0f, 0f);
+        public override bool CanGrab => base.CanGrab && !locked;
+        public float MeasuredRate { get; private set; }   // Sv/h shown on the display (smoothed)
 
-        public float TrueCps { get; private set; }
-        public float MeasuredCps { get; private set; }
+        bool pickedUp;
 
         // shared with the audio thread
         volatile float audioCps;
         int clickCounter;
-
         // audio-thread state
         System.Random rng;
         int sampleRate;
-        float decay;
-        float clickEnv, ringPhase, ringStep, clickSign = 1f;
-        float vol;
+        float decay, clickEnv, ringPhase, ringStep, clickSign = 1f, vol;
 
         int lastClicks;
         float ledTimer;
 
-        void Awake()
+        protected override void Awake()
         {
+            base.Awake();
             rng = new System.Random();
             sampleRate = AudioSettings.outputSampleRate;
             decay = Mathf.Exp(-1f / (0.0012f * sampleRate)); // ~1.2 ms click
             vol = volume;
 
-            // a silent looping clip keeps the AudioSource running so OnAudioFilterRead can add the clicks
             var src = GetComponent<AudioSource>();
             src.clip = AudioClip.Create("Silence", sampleRate, 1, sampleRate, false);
             src.loop = true;
             src.playOnAwake = true;
-            src.spatialBlend = 0.5f;
-            src.minDistance = 0.5f;
+            src.spatialBlend = 0.7f;
+            src.minDistance = 0.6f;
             src.Play();
         }
 
-        void OnEnable() => Application.onBeforeRender += UpdatePose;
-        void OnDisable() => Application.onBeforeRender -= UpdatePose;
-
-        void Update()
+        public override void Grab(Transform hand, bool snapToHand)
         {
+            base.Grab(hand, snapToHand);
+            if (!pickedUp)
+            {
+                pickedUp = true;
+                ShowcaseEvents.Raise(actionId);
+            }
+        }
+
+        public override void HeldUpdate()
+        {
+            var rig = ShowcaseRig.Instance;
+            if (holder != null && rig != null && !rig.VRActive)
+            {
+                // desktop: show it at the bottom-right of the view, display tilted toward the camera
+                Transform h = rig.head;
+                transform.SetPositionAndRotation(h.position + h.forward * 0.42f + h.right * 0.17f - h.up * 0.2f,
+                    h.rotation * Quaternion.Euler(-65f, 0f, 0f));
+                return;
+            }
+            base.HeldUpdate();
+        }
+
+        public override void ResetItem()
+        {
+            locked = true;
+            pickedUp = false;
+            base.ResetItem();
+        }
+
+        protected override void Update()
+        {
+            base.Update();
             vol = volume;
 
-            // --- true count rate at the probe ---
-            Vector3 probe = probeTip != null ? probeTip.position : transform.position;
-            float cps = backgroundCps;
+            float ambient = 0f;
             if (source != null)
-            {
-                Vector3 a = probe; a.y = 0f;
-                Vector3 b = source.transform.position; b.y = 0f;
-                float t = Mathf.Clamp01(1f - Vector3.Distance(a, b) / source.beepRange);
-                float leak = source.fanOn ? 1f : 0.3f;
-                cps += maxCps * Mathf.Pow(t, falloffPower) * leak;
-            }
-            TrueCps = cps;
-            audioCps = cps;
+                ambient = source.AmbientRateAt(probeTip != null ? probeTip.position : transform.position);
 
-            // --- measured rate from the clicks actually heard (so the needle jitters like a real meter) ---
+            // click rate: background + a curve that keeps a usable range from "tick... tick" to a saturated buzz
+            float k = source != null && source.maxRateSvPerHour > 0f ? Mathf.Clamp01(ambient / source.maxRateSvPerHour) : 0f;
+            audioCps = backgroundCps + maxCps * Mathf.Pow(k, cpsCurve);
+
+            // display reading smoothed like a real meter
+            MeasuredRate = Mathf.Lerp(MeasuredRate, ambient, 1f - Mathf.Exp(-Time.deltaTime / 0.4f));
+
             int clicks = Interlocked.CompareExchange(ref clickCounter, 0, 0);
-            int newClicks = clicks - lastClicks;
+            if (clicks != lastClicks) ledTimer = 0.035f;
             lastClicks = clicks;
-            if (Time.deltaTime > 0f)
-            {
-                float instant = newClicks / Time.deltaTime;
-                MeasuredCps = Mathf.Lerp(MeasuredCps, instant, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
-            }
-            if (newClicks > 0) ledTimer = 0.035f;
             ledTimer -= Time.deltaTime;
 
             UpdateDisplay();
         }
 
-        void LateUpdate() => UpdatePose();
-
         void UpdateDisplay()
         {
+            float uSvh = MeasuredRate * 1e6f + 0.1f; // background floor ~0.1 µSv/h
             if (needle != null)
             {
-                // log scale: 0 -> 1000 CPS mapped to -60°..+60°
-                float k = Mathf.Clamp01(Mathf.Log10(MeasuredCps + 1f) / 3f);
-                float angle = Mathf.Lerp(-60f, 60f, k);
-                needle.localRotation = Quaternion.Euler(0f, 0f, -angle);
+                // log scale: 0.1 µSv/h (-60°) ... 10 kSv/h (+60°)
+                float n = Mathf.Clamp01((Mathf.Log10(uSvh) + 1f) / 11f);
+                needle.localRotation = Quaternion.Euler(0f, 0f, -Mathf.Lerp(-60f, 60f, n));
             }
-            if (readout != null)
+            if (rateText != null)
             {
-                string color = MeasuredCps > 100f ? "#FF4A3A" : MeasuredCps > 20f ? "#FFC040" : "#7CFF9A";
-                readout.text = $"<color={color}>{MeasuredCps:0}</color> <size=60>CPS</size>";
+                string c = MeasuredRate < 0.0001f ? "#7CFF9A" : MeasuredRate < 0.1f ? "#FFC040" : "#FF4A3A";
+                rateText.text = $"<color={c}>{RadiationEffects.Rate(MeasuredRate)}</color>";
             }
+            if (doseText != null && source != null)
+            {
+                Color dc = RadiationEffects.LevelColor(source.TotalDose);
+                doseText.text = $"DOSE  <color=#{ColorUtility.ToHtmlStringRGB(dc)}>{RadiationEffects.Dose(source.TotalDose)}</color>";
+            }
+            if (alarmText != null)
+                alarmText.enabled = MeasuredRate > 1f && Mathf.Repeat(Time.time, 0.5f) < 0.3f;
             if (led != null) led.color = ledTimer > 0f ? ledOn : ledOff;
-        }
-
-        void UpdatePose()
-        {
-            if (rig == null) return;
-            if (rig.VRActive)
-            {
-                // strapped to the left wrist (hands stay free for grabbing)
-                transform.SetPositionAndRotation(rig.leftHand.TransformPoint(handOffset),
-                    rig.leftHand.rotation * Quaternion.Euler(handEuler));
-            }
-            else
-            {
-                // desktop: bottom-right of the view, display tilted toward the camera
-                Transform h = rig.head;
-                transform.SetPositionAndRotation(h.position + h.forward * 0.42f + h.right * 0.17f - h.up * 0.2f,
-                    h.rotation * Quaternion.Euler(-65f, 0f, 0f));
-            }
         }
 
         // ---------------------------------------------------------------- audio thread
 
         void OnAudioFilterRead(float[] data, int channels)
         {
-            double pClick = audioCps / sampleRate; // chance of a click in each sample
+            double pClick = audioCps / sampleRate;
             for (int i = 0; i < data.Length; i += channels)
             {
                 if (rng.NextDouble() < pClick)

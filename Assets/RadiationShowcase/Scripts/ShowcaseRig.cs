@@ -15,13 +15,17 @@ namespace RadiationShowcase
     ///   Right stick L/R      = snap turn 45°
     ///   Right stick UP       = aim teleport arc from the right hand, let go of the stick = teleport
     ///   Grip (hold)          = grab / hold an object, release Grip = let go (throw by swinging)
+    ///   Trigger + Grip       = Bonelab-style force grab: point at an item up to ~4 m away and it flies into the hand
+    ///                          (hold Trigger alone to see which item you're pointing at — it glows)
     ///   Poke with fingertip  = press 3D buttons
     ///   Y (left hand)        = show / hide the handbook
     ///   B (right hand)       = reset
     /// Desktop (testing): click Game view to lock mouse, mouse = look, WASD = walk, Shift = toggle sprint,
     ///   hold Right Mouse = aim teleport, release = teleport,
     ///   hold Left Mouse = grab / press what the crosshair points at, hold F = bring held item to your body/mouth,
-    ///   Q/E = snap turn, H = handbook, R = reset, Esc = free the mouse.
+    ///   Q/E = snap turn, H = handbook, R = reset, Esc = pause menu (frees the mouse).
+    ///   The Geiger counter goes to the (virtual) left hand and stays there; G = put it down.
+    ///   Holding the axe: aim at the glass case up close and press Space to swing.
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
     public class ShowcaseRig : MonoBehaviour
@@ -53,6 +57,12 @@ namespace RadiationShowcase
         [Header("Interaction")]
         public float grabRadius = 0.09f;
         public float desktopReach = 2.5f;
+        [Tooltip("Force grab (Trigger + Grip): how far you can pull items from")]
+        public float forceGrabRange = 4f;
+        [Tooltip("Force grab: aim assist radius of the pointing ray")]
+        public float forceGrabRadius = 0.12f;
+        [Tooltip("Force grab: how fast the item flies to the hand (m/s)")]
+        public float pullSpeed = 9f;
         public Color gloveColor = new Color(0.55f, 0.75f, 0.95f);  // H3VR-style hand orbs
         public Color suitGloveColor = new Color(0.95f, 0.75f, 0.1f);
         [Tooltip("Items whose colliders must not push the player body")]
@@ -79,8 +89,9 @@ namespace RadiationShowcase
         class Hand
         {
             public Transform t;
-            public InputAction grip;
+            public InputAction grip, trigger;
             public Grabbable held;
+            public Grabbable pulling;        // item flying toward this hand
             public Vector3 prevPos, velocity, angularVelocity;
             public Quaternion prevRot = Quaternion.identity;
             public bool poking;
@@ -91,7 +102,7 @@ namespace RadiationShowcase
         Hand left, right;
         InputAction headPos, headRot, lPos, lRot, rPos, rRot;
         InputAction moveAction, sprintAction, turnAction, resetAction;
-        InputAction rAimPos, rAimRot, handbookAction;
+        InputAction rAimPos, rAimRot, lAimPos, lAimRot, handbookAction;
         readonly List<InputAction> allActions = new List<InputAction>();
         readonly Collider[] overlap = new Collider[16];
 
@@ -119,6 +130,8 @@ namespace RadiationShowcase
             rRot = Make("RRot", "Quaternion", "<XRController>{RightHand}/deviceRotation");
             rAimPos = Make("RAimPos", "Vector3", "<XRController>{RightHand}/pointerPosition");
             rAimRot = Make("RAimRot", "Quaternion", "<XRController>{RightHand}/pointerRotation");
+            lAimPos = Make("LAimPos", "Vector3", "<XRController>{LeftHand}/pointerPosition");
+            lAimRot = Make("LAimRot", "Quaternion", "<XRController>{LeftHand}/pointerRotation");
 
             moveAction = Make("Move", "Vector2", "<XRController>{LeftHand}/thumbstick", "<XRController>{LeftHand}/{Primary2DAxis}");
             turnAction = Make("Turn", "Vector2", "<XRController>{RightHand}/thumbstick", "<XRController>{RightHand}/{Primary2DAxis}");
@@ -130,12 +143,14 @@ namespace RadiationShowcase
             {
                 t = leftHand,
                 grip = MakeButton("LGrip", "<XRController>{LeftHand}/gripPressed", "<XRController>{LeftHand}/{GripButton}"),
+                trigger = MakeButton("LTrigger", "<XRController>{LeftHand}/triggerPressed", "<XRController>{LeftHand}/{TriggerButton}"),
                 renderers = leftHand.GetComponentsInChildren<Renderer>(true)
             };
             right = new Hand
             {
                 t = rightHand,
                 grip = MakeButton("RGrip", "<XRController>{RightHand}/gripPressed", "<XRController>{RightHand}/{GripButton}"),
+                trigger = MakeButton("RTrigger", "<XRController>{RightHand}/triggerPressed", "<XRController>{RightHand}/{TriggerButton}"),
                 renderers = rightHand.GetComponentsInChildren<Renderer>(true)
             };
         }
@@ -148,6 +163,86 @@ namespace RadiationShowcase
             return a;
         }
 
+        // ---------------------------------------------------------------- menu laser pointers
+
+        readonly LineRenderer[] menuLasers = new LineRenderer[2];
+        static readonly Color LaserIdle = new Color(1f, 1f, 1f, 0.5f);
+        static readonly Color LaserHover = new Color(0.3f, 0.9f, 1f, 1f);
+
+        void CreateMenuLasers()
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                var go = new GameObject(i == 0 ? "MenuLaser_L" : "MenuLaser_R");
+                go.transform.SetParent(transform, false);
+                go.layer = 5;   // UI layer: still visible on the black end screen
+                var lr = go.AddComponent<LineRenderer>();
+                lr.useWorldSpace = true;
+                lr.positionCount = 2;
+                lr.widthMultiplier = 0.006f;
+                lr.numCapVertices = 4;
+                if (line != null) lr.sharedMaterial = line.sharedMaterial;
+                lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                lr.enabled = false;
+                menuLasers[i] = lr;
+            }
+        }
+
+        void GetAim(Hand h, out Vector3 origin, out Vector3 dir)
+        {
+            // the controller's "aim" pose points where you point; the grip pose is tilted ~40° down
+            var aimPos = h == right ? rAimPos : lAimPos;
+            var aimRot = h == right ? rAimRot : lAimRot;
+            if (aimPos.controls.Count > 0 && aimRot.controls.Count > 0)
+            {
+                origin = cameraOffset.TransformPoint(aimPos.ReadValue<Vector3>());
+                dir = cameraOffset.rotation * aimRot.ReadValue<Quaternion>() * Vector3.forward;
+                return;
+            }
+            origin = h.t.position;
+            dir = h.t.forward;
+        }
+
+        void MenuPointer(Hand h, int index)
+        {
+            var lr = menuLasers[index];
+            GetAim(h, out Vector3 origin, out Vector3 dir);
+
+            WorldButton best = null;
+            float bestDist = 8f;
+            Vector3 end = origin + dir * 3f;
+            var menu = PauseMenu.Instance;
+            foreach (var hit in Physics.RaycastAll(origin, dir, 8f, ~0, QueryTriggerInteraction.Collide))
+            {
+                var b = hit.collider.GetComponentInParent<WorldButton>();
+                if (b == null || menu == null || !menu.IsMenuButton(b) || hit.distance >= bestDist) continue;
+                best = b;
+                bestDist = hit.distance;
+                end = hit.point;
+            }
+
+            if (lr != null)
+            {
+                lr.enabled = true;
+                lr.SetPosition(0, origin);
+                lr.SetPosition(1, end);
+                Color c = best != null ? LaserHover : LaserIdle;
+                lr.startColor = c;
+                lr.endColor = c;
+            }
+
+            if (best != null)
+            {
+                best.MarkHovered();
+                if (h.trigger.WasPressedThisFrame()) best.Press();
+            }
+        }
+
+        void HideMenuLasers()
+        {
+            foreach (var lr in menuLasers) if (lr != null && lr.enabled) lr.enabled = false;
+        }
+
         InputAction MakeButton(string name, params string[] bindings)
         {
             var a = new InputAction(name, InputActionType.Button);
@@ -158,6 +253,10 @@ namespace RadiationShowcase
 
         void Start()
         {
+            CreateMenuLasers();
+            // UI layer: the desktop crosshair stays visible on the black end screen too
+            if (crosshair != null)
+                foreach (var t in crosshair.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = 5;
             // held / hanging items must not shove the player's body around
             if (items != null)
                 foreach (var item in items)
@@ -198,6 +297,23 @@ namespace RadiationShowcase
             foreach (var r in left.renderers) r.enabled = VRActive;
             foreach (var r in right.renderers) r.enabled = VRActive;
 
+            // paused / end screen: both hands become laser pointers for the menu (point + Trigger)
+            if (PauseMenu.Paused || (PauseMenu.Instance != null && PauseMenu.Instance.EndScreenOpen))
+            {
+                if (VRActive) { MenuPointer(left, 0); MenuPointer(right, 1); }
+                else HideMenuLasers();
+                HideTeleport();
+                aiming = false;
+                if (crosshair != null)
+                {
+                    // desktop: aim at menu buttons with the crosshair
+                    crosshair.gameObject.SetActive(!VRActive);
+                    crosshair.SetPositionAndRotation(head.position + head.forward * 0.5f, head.rotation);
+                }
+                return;
+            }
+
+            HideMenuLasers();
             if (resetAction.WasPressedThisFrame()) ResetRequested?.Invoke();
             if (handbookAction.WasPressedThisFrame()) ToggleHandbook();
 
@@ -211,7 +327,11 @@ namespace RadiationShowcase
                 UpdateHandVR(left);
                 UpdateHandVR(right);
             }
-            else UpdateHandDesktop(right);
+            else
+            {
+                UpdateHandDesktop(right);
+                UpdateLeftHandDesktop();
+            }
 
             if (crosshair != null)
             {
@@ -285,7 +405,6 @@ namespace RadiationShowcase
 
             var mouse = Mouse.current;
             var kb = Keyboard.current;
-            if (kb != null && kb.escapeKey.wasPressedThisFrame) Cursor.lockState = CursorLockMode.None;
             if (mouse != null && Cursor.lockState == CursorLockMode.Locked)
             {
                 Vector2 d = mouse.delta.ReadValue() * mouseSensitivity;
@@ -514,7 +633,45 @@ namespace RadiationShowcase
         {
             TrackVelocity(h);
 
-            // poke 3D buttons with the fingertip
+            Poke(h);
+
+            if (h.pulling != null)
+            {
+                UpdatePull(h);
+                return;
+            }
+
+            if (h.held == null)
+            {
+                Grabbable nearest = FindNearestGrabbable(h.t.position);
+                if (nearest != null)
+                {
+                    nearest.MarkHovered();
+                    if (h.grip.WasPressedThisFrame()) DoGrab(h, nearest, false);
+                }
+                else if (h.trigger.IsPressed())
+                {
+                    // force grab: Trigger aims (laser + glow), Trigger + Grip together pulls it in — either order
+                    Grabbable target = FindForceGrabTarget(h, out Vector3 origin, out Vector3 end);
+                    DrawAimLaser(h, origin, end, target != null);
+                    if (target != null)
+                    {
+                        target.MarkHovered();
+                        if (h.grip.IsPressed()) StartPull(h, target);
+                    }
+                }
+            }
+            else
+            {
+                if (!h.grip.IsPressed()) DoRelease(h);
+                else h.held.HeldUpdate();
+                if (h.held != null && !h.held.gameObject.activeInHierarchy) h.held = null; // worn / eaten
+            }
+        }
+
+        /// <summary>Press 3D buttons by touching them with the round hand.</summary>
+        void Poke(Hand h)
+        {
             Vector3 tip = h.t.TransformPoint(0f, 0f, 0.02f); // front of the round hand
             bool touching = false;
             int n = Physics.OverlapSphereNonAlloc(tip, 0.035f, overlap, ~0, QueryTriggerInteraction.Collide);
@@ -528,19 +685,6 @@ namespace RadiationShowcase
                 break;
             }
             h.poking = touching;
-
-            if (h.held == null)
-            {
-                Grabbable nearest = FindNearestGrabbable(h.t.position);
-                if (nearest != null) nearest.MarkHovered();
-                if (h.grip.WasPressedThisFrame() && nearest != null) DoGrab(h, nearest, false);
-            }
-            else
-            {
-                if (!h.grip.IsPressed()) DoRelease(h);
-                else h.held.HeldUpdate();
-                if (h.held != null && !h.held.gameObject.activeInHierarchy) h.held = null; // worn / eaten
-            }
         }
 
         void UpdateHandDesktop(Hand h)
@@ -570,7 +714,11 @@ namespace RadiationShowcase
                     else if (g != null && g.CanGrab)
                     {
                         g.MarkHovered();
-                        if (mouse.leftButton.wasPressedThisFrame)
+                        if (mouse.leftButton.wasPressedThisFrame && g is GeigerCounter)
+                        {
+                            DoGrab(left, g, true);          // the Geiger stays in the left hand
+                        }
+                        else if (mouse.leftButton.wasPressedThisFrame)
                         {
                             bool isLever = g is LeverHandle;
                             if (!isLever) h.t.position = hit.point;
@@ -585,6 +733,104 @@ namespace RadiationShowcase
                 else h.held.HeldUpdate();
                 if (h.held != null && !h.held.gameObject.activeInHierarchy) h.held = null;
             }
+        }
+
+        void UpdateLeftHandDesktop()
+        {
+            if (left.held == null) return;
+            var kb = Keyboard.current;
+            if (kb != null && kb.gKey.wasPressedThisFrame)
+            {
+                left.t.position = head.position + FlatForward * 0.5f;   // put it down in front of you
+                left.held.Release(Vector3.zero, Vector3.zero);
+                left.held = null;
+                return;
+            }
+            left.held.HeldUpdate();
+            if (!left.held.gameObject.activeInHierarchy) left.held = null;
+        }
+
+        // ---------------------------------------------------------------- force grab (Bonelab style)
+
+        Grabbable FindForceGrabTarget(Hand h, out Vector3 origin, out Vector3 end)
+        {
+            GetAim(h, out origin, out Vector3 dir);
+            end = origin + dir * forceGrabRange;
+
+            // 1) candidates: grabbable items along a fat ray (aim assist)
+            Grabbable best = null;
+            float bestScore = float.MaxValue;
+            Vector3 bestPoint = end;
+            foreach (var hit in Physics.SphereCastAll(origin, forceGrabRadius, dir, forceGrabRange, ~0, QueryTriggerInteraction.Ignore))
+            {
+                var g = hit.collider.GetComponentInParent<Grabbable>();
+                if (g == null || !g.CanForcePull) continue;
+                Vector3 c = hit.collider.bounds.center;
+                // prefer items closest to the pointing line, then nearer ones
+                float offLine = Vector3.Cross(dir, c - origin).magnitude;
+                float score = offLine * 4f + Vector3.Distance(origin, c) * 0.1f;
+                if (score < bestScore) { bestScore = score; best = g; bestPoint = c; }
+            }
+            if (best == null) return null;
+
+            // 2) line of sight: a wall / glass between hand and item blocks it (the floor or table it rests on doesn't)
+            Vector3 to = bestPoint - origin;
+            float dist = to.magnitude;
+            foreach (var hit in Physics.RaycastAll(origin, to / dist, dist, ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider == body) continue;
+                if (hit.collider.GetComponentInParent<Grabbable>() == best) continue;
+                if (hit.collider.GetComponentInParent<Grabbable>() != null) continue;
+                if (hit.distance < dist - 0.05f) return null;
+            }
+            end = bestPoint;
+            return best;
+        }
+
+        void DrawAimLaser(Hand h, Vector3 origin, Vector3 end, bool onTarget)
+        {
+            var lr = menuLasers[h == left ? 0 : 1];
+            if (lr == null) return;
+            lr.enabled = true;
+            lr.SetPosition(0, origin);
+            lr.SetPosition(1, end);
+            Color c = onTarget ? LaserHover : new Color(1f, 1f, 1f, 0.25f);
+            lr.startColor = c;
+            lr.endColor = c;
+        }
+
+        void StartPull(Hand h, Grabbable g)
+        {
+            Hand other = h == left ? right : left;
+            if (other.pulling == g) other.pulling = null;
+            h.pulling = g;
+            g.BeginPull();
+        }
+
+        void UpdatePull(Hand h)
+        {
+            var g = h.pulling;
+            if (g == null || !g.gameObject.activeInHierarchy || g.IsHeld) { h.pulling = null; return; }
+
+            // let go of Grip mid-air = cancel, the item drops
+            if (!h.grip.IsPressed())
+            {
+                g.CancelPull();
+                h.pulling = null;
+                return;
+            }
+
+            Vector3 to = h.t.position - g.transform.position;
+            float dist = to.magnitude;
+            if (dist < 0.15f)
+            {
+                h.pulling = null;
+                DoGrab(h, g, false);   // snaps into the hand at its grip point
+                return;
+            }
+            float step = Mathf.Min(dist, (pullSpeed + dist * 4f) * Time.deltaTime);
+            g.transform.position += to / dist * step;
+            g.MarkHovered();
         }
 
         Grabbable FindNearestGrabbable(Vector3 p)
@@ -619,6 +865,8 @@ namespace RadiationShowcase
 
         public void ReleaseAll()
         {
+            left.pulling = null;
+            right.pulling = null;
             if (left.held != null) { left.held.Release(Vector3.zero, Vector3.zero); left.held = null; }
             if (right.held != null) { right.held.Release(Vector3.zero, Vector3.zero); right.held = null; }
         }

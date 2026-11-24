@@ -40,7 +40,7 @@ namespace RadiationShowcase
             if (targetRenderer == null) return;
             float strength = 0.15f;
             if (highlighted) strength = 0.6f + 0.6f * Mathf.Sin(Time.time * 6f);
-            if (IsHovered) strength = 2.5f;
+            if (IsHovered) strength = 0.6f;   // gentle, so the label on the button stays readable
 
             targetRenderer.GetPropertyBlock(block);
             block.SetColor(EmissionId, emissionColor * strength);

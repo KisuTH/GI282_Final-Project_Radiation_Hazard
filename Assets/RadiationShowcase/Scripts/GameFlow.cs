@@ -1,11 +1,14 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace RadiationShowcase
 {
     /// <summary>
-    /// Survival guide + win condition + instant reset.
-    /// Steps 1-3 can be done in any order (the board suggests an order); step 4 = walk through the leak to EXIT.
+    /// Survival guide + win / death + instant reset.
+    /// Preparation steps can be done in any order (the board suggests one); the last step is walking through
+    /// the leak to EXIT. Reaching the lethal dose kills the player. Either ending fades slowly to black, then
+    /// shows the dose received and what that dose does to a human body.
     /// </summary>
     public class GameFlow : MonoBehaviour
     {
@@ -20,29 +23,35 @@ namespace RadiationShowcase
         [Header("References")]
         public ShowcaseRig rig;
         public RadiationSource radiation;
+        public ExposureEffects exposureEffects;
+        public BreakableGlass glass;
         public Transform startPoint;
         public Transform exitPoint;
         public float exitRadius = 1.0f;
-        [Tooltip("Suit, pill bottle, lever — reset on restart, highlighted when it's their step")]
+        [Tooltip("Geiger, axe, suit, lever, pill bottle — reset on restart")]
         public Grabbable[] interactables;
-        public string[] interactableIds;   // same order as interactables
+        [Tooltip("Step id each interactable belongs to (same order); used for highlighting")]
+        public string[] interactableIds;
         public Text fanStatusLabel;
 
         [Header("UI")]
         public Text boardSteps;
         public Text boardStatus;
-        public Text hudText;
-        public GameObject successPanel;
-        public Text successText;
         [Tooltip("All Text components, so a Thai-capable OS font can be applied at runtime")]
         public Text[] allTexts;
 
-        [Header("Dose limit")]
-        [Tooltip("Total dose (µSv) that ends the run; the game then restarts by itself")]
-        public float doseLimit = 25f;
-        public float failRestartDelay = 4f;
-        public Color successColor = new Color(0.02f, 0.12f, 0.06f, 0.92f);
-        public Color failColor = new Color(0.25f, 0.02f, 0.02f, 0.94f);
+        [Header("Ending (fade to black)")]
+        public Camera playerCamera;
+        public Image fadeImage;              // black image right in front of the camera
+        public GameObject endPanel;          // message panel on the 'UI' layer
+        public Text endText;
+        public int endLayer = 5;             // UI layer: the only thing the camera shows after the fade
+        public float fadeDuration = 3f;
+        public float deathRestartDelay = 12f;
+
+        [Header("Dose")]
+        [Tooltip("Body dose (Sv) that kills the player. LD50 without treatment is about 3.5–5 Sv")]
+        public float lethalDose = 4f;
 
         [Header("Protection")]
         public float suitFactor = 0.4f;
@@ -51,24 +60,27 @@ namespace RadiationShowcase
         [Header("Steps")]
         public Step[] steps =
         {
+            new Step { id = "geiger", title = "หยิบ Geiger Counter จากตู้ฉุกเฉิน",
+                howTo = "หยิบขวานข้างตู้ (Grip) เหวี่ยงทุบกระจกให้แตก แล้วจับเครื่องถือไว้ ค่ารังสีดูได้จากเครื่องเท่านั้น" },
             new Step { id = "suit", title = "สวมชุดป้องกันรังสี",
-                howTo = "เดินไปที่ราวแขวนชุด กด Grip จับชุดค้างไว้ แล้วดึงมาแนบตัว" },
+                howTo = "ไปที่ราวแขวนชุด กด Grip จับชุดค้างไว้ แล้วดึงมาแนบตัว" },
             new Step { id = "fan", title = "ปิดพัดลมระบายอากาศ",
-                howTo = "ไปที่แผงสีฟ้าบนผนัง จับปุ่มหัวคันโยกสีแดง (Grip) แล้วโยกลงจนสุด" },
-            new Step { id = "pill", title = "กินยา Radiation Blocker",
+                howTo = "จับหัวคันโยกสีแดงบนแผงสีฟ้า (Grip) แล้วโยกลงจนสุด" },
+            new Step { id = "pill", title = "กินยา Potassium Iodide (KI)",
                 howTo = "หยิบขวดยาสีส้มบนโต๊ะ แล้วยกขึ้นมาที่ปาก" },
             new Step { id = "", title = "เดินฝ่าโซนรังสีไปที่ทางออก",
-                howTo = "รังสีรั่วอยู่ข้างประตู! รีบเดิน (กดสติ๊กซ้าย = วิ่ง) ผ่านวงสีแดงไปที่ EXIT" },
+                howTo = "รังสีรั่วอยู่ข้างประตู! ดูค่าจาก Geiger แล้วรีบผ่านวงแดง (กดสติ๊กซ้าย = วิ่ง) ไปที่ EXIT" },
         };
 
         bool[] done;
         float elapsed;
-        bool finished, failed;
-        float restartTimer;
+        bool finished;
         float statusTimer;
-        const string DefaultStatus = "Geiger Counter ที่ข้อมือคลิกถี่ = ใกล้จุดรั่ว  เตรียมตัวให้ครบก่อนออกจากห้อง";
+        int originalMask;
+        Coroutine endRoutine;
+        const string DefaultStatus = "ค่ารังสีดูได้จาก Geiger Counter เท่านั้น  ยิ่งคลิกถี่ = ยิ่งใกล้จุดรั่ว  ถ้าตาเริ่มมืด = ได้รับรังสีมากแล้ว";
         AudioSource sfx;
-        AudioClip stepClip, winClip, errorClip;
+        AudioClip stepClip, winClip, errorClip, deathClip;
 
         void Awake()
         {
@@ -79,6 +91,8 @@ namespace RadiationShowcase
             stepClip = ProceduralAudio.Notes("StepDone", new[] { 880f, 1320f }, 0.12f, 0.5f);
             winClip = ProceduralAudio.Notes("Win", new[] { 660f, 880f, 1100f, 1320f }, 0.14f, 0.5f);
             errorClip = ProceduralAudio.Notes("Error", new[] { 300f, 220f }, 0.15f, 0.5f);
+            deathClip = ProceduralAudio.Notes("Death", new[] { 220f, 196f, 165f, 110f }, 0.35f, 0.5f);
+            if (playerCamera != null) originalMask = playerCamera.cullingMask;
             ApplyThaiFont();
         }
 
@@ -98,6 +112,8 @@ namespace RadiationShowcase
 
         void Start() => ResetGame();
 
+        public bool IsFinished => finished;
+
         /// <summary>The default UI font has no Thai glyphs, so use a Windows Thai font at runtime.</summary>
         void ApplyThaiFont()
         {
@@ -112,16 +128,23 @@ namespace RadiationShowcase
 
         public void ResetGame()
         {
+            if (endRoutine != null) { StopCoroutine(endRoutine); endRoutine = null; }
             for (int i = 0; i < done.Length; i++) done[i] = false;
             elapsed = 0f;
             finished = false;
-            failed = false;
+
             if (rig != null) rig.ReleaseAll();
+            if (glass != null) glass.ResetGlass();
             if (interactables != null)
                 foreach (var g in interactables) if (g != null) g.ResetItem();
-            if (radiation != null) { radiation.ResetState(); radiation.protection = 1f; }
+            Physics.SyncTransforms();   // physics sees the reset positions immediately
+            if (radiation != null) radiation.ResetState();
+            if (exposureEffects != null) exposureEffects.ResetEffects();
             if (rig != null) { rig.SetGloves(false); if (startPoint != null) rig.ResetTo(startPoint); }
-            if (successPanel != null) successPanel.SetActive(false);
+
+            if (playerCamera != null) playerCamera.cullingMask = originalMask;
+            SetFade(0f);
+            if (endPanel != null) endPanel.SetActive(false);
             SetFanLabel(true);
             RefreshBoard();
             SetStatus(DefaultStatus, 0f);
@@ -141,17 +164,20 @@ namespace RadiationShowcase
 
             switch (id)
             {
+                case "geiger":
+                    SetStatus("ได้ Geiger Counter แล้ว ถือไว้ตลอด หน้าจอบอกอัตรารังสี (บน) และรังสีที่ร่างกายได้รับสะสม (DOSE)", 4f);
+                    break;
                 case "suit":
                     rig.SetGloves(true);
-                    SetStatus("สวมชุดป้องกันรังสีแล้ว ลดการรับรังสีได้ ~60%", 3f);
+                    SetStatus("สวมชุดป้องกันรังสีแล้ว ร่างกายได้รับรังสีน้อยลง ~60%", 3f);
                     break;
                 case "fan":
                     if (radiation != null) radiation.fanOn = false;
                     SetFanLabel(false);
-                    SetStatus("ปิดพัดลมแล้ว รังสีกระจายช้าลง", 3f);
+                    SetStatus("ปิดพัดลมแล้ว รังสีกระจายน้อยลง ~70% (ลองดูค่าบน Geiger)", 3f);
                     break;
                 case "pill":
-                    SetStatus("กินยาแล้ว ร่างกายดูดซับรังสีน้อยลง ~50%", 3f);
+                    SetStatus("กินยา KI แล้ว ไทรอยด์ไม่ดูดไอโอดีนกัมมันตรังสี (ในเกม: ลดรังสี ~50%)", 3f);
                     break;
             }
 
@@ -188,89 +214,117 @@ namespace RadiationShowcase
             return true;
         }
 
+        // ---------------------------------------------------------------- endings
+
         void Win()
         {
-            finished = true;
             for (int i = 0; i < done.Length; i++) done[i] = true;
-            sfx.PlayOneShot(winClip);
             RefreshBoard();
-            SetStatus("สำเร็จ! แตะปุ่ม RESET เพื่อเล่นใหม่", 0f);
-            if (successPanel == null) return;
+            sfx.PlayOneShot(winClip);
+            endRoutine = StartCoroutine(EndSequence(false));
+        }
 
-            ShowPanel(successColor);
+        void Die()
+        {
+            sfx.PlayOneShot(deathClip);
+            endRoutine = StartCoroutine(EndSequence(true));
+        }
 
-            if (successText != null)
+        IEnumerator EndSequence(bool died)
+        {
+            finished = true;
+            if (radiation != null) radiation.accumulate = false;   // freeze the dose for the report
+            float dose = radiation != null ? radiation.TotalDose : 0f;
+
+            // 1) slow fade to black
+            for (float t = 0f; t < fadeDuration; t += Time.deltaTime)
             {
-                int m = (int)(elapsed / 60f), s = (int)(elapsed % 60f);
-                float dose = radiation != null ? radiation.TotalDose : 0f;
-                successText.text =
-                    "<size=96><color=#5CFF8A>สำเร็จ / ปลอดภัย</color></size>\n\n" +
-                    "คุณฝ่าโซนรังสีรั่วไหลออกมาได้อย่างปลอดภัย\n\n" +
-                    $"เวลาที่ใช้: {m:00}:{s:00}     รังสีสะสม: {dose:0.00} µSv\n\n" +
-                    "<size=34><color=#BBBBBB>เอามือแตะปุ่ม RESET  หรือกด B  (คีย์บอร์ด: R)  เพื่อเริ่มใหม่</color></size>";
+                SetFade(t / fadeDuration);
+                yield return null;
+            }
+            SetFade(1f);
+
+            // 2) only the message stays visible (the camera clears to black), with no dark edges over it
+            if (exposureEffects != null) exposureEffects.Suppress(true);
+            if (playerCamera != null) playerCamera.cullingMask = 1 << endLayer;
+            SetFade(0f);
+            if (endPanel != null)
+            {
+                Transform head = rig.head;
+                Vector3 fwd = rig.FlatForward;
+                endPanel.transform.SetPositionAndRotation(head.position + fwd * 1.3f, Quaternion.LookRotation(fwd, Vector3.up));
+                endPanel.SetActive(true);
+            }
+
+            // 3) message (death: auto restart after a countdown)
+            if (!died)
+            {
+                SetEndText(false, dose, 0f);
+                yield break;                                     // wait for B / R
+            }
+            for (float left = deathRestartDelay; left > 0f; left -= Time.deltaTime)
+            {
+                SetEndText(true, dose, left);
+                yield return null;
+            }
+            ResetGame();
+        }
+
+        void SetEndText(bool died, float dose, float secondsLeft)
+        {
+            if (endText == null) return;
+            string doseColor = "#" + ColorUtility.ToHtmlStringRGB(RadiationEffects.LevelColor(dose));
+            int m = (int)(elapsed / 60f), s = (int)(elapsed % 60f);
+            string effects = RadiationEffects.Describe(dose);
+
+            if (died)
+            {
+                endText.text =
+                    "<size=96><color=#FF4A3A>เสียชีวิต</color></size>\n\n" +
+                    $"ร่างกายได้รับรังสี <color={doseColor}><b>{RadiationEffects.Dose(dose)}</b></color>  (= {dose * 1000f:0} mSv)\n" +
+                    $"เกินระดับอันตรายถึงชีวิตของเกมนี้ ({lethalDose:0} Sv)\n\n" +
+                    $"<color=#FFD54A>ผลต่อร่างกาย:</color> {effects}\n\n" +
+                    "<size=34><color=#BBBBBB>ครั้งหน้า: ใส่ชุด กินยา KI ปิดพัดลม แล้วรีบผ่านจุดรั่ว อย่าอยู่ใกล้นาน</color></size>\n" +
+                    $"<size=36><color=#FFD54A>เริ่มใหม่อัตโนมัติใน {Mathf.CeilToInt(secondsLeft)} วินาที</color></size>";
+            }
+            else
+            {
+                endText.text =
+                    "<size=96><color=#5CFF8A>รอดชีวิต / ปลอดภัย</color></size>\n\n" +
+                    $"ออกจากพื้นที่รังสีรั่วไหลได้ในเวลา {m:00}:{s:00}\n" +
+                    $"ร่างกายได้รับรังสีรวม <color={doseColor}><b>{RadiationEffects.Dose(dose)}</b></color>  (= {dose * 1000f:0.#} mSv)\n\n" +
+                    $"<color=#FFD54A>ผลต่อร่างกาย:</color> {effects}\n\n" +
+                    "<size=34><color=#BBBBBB>เลือกเมนูด้านล่าง (VR: ชี้แล้วกด Trigger | PC: คลิก)</color></size>";
             }
         }
 
-        void ShowPanel(Color background)
+        void SetFade(float a)
         {
-            successPanel.SetActive(true);
-            var bg = successPanel.GetComponentInChildren<Image>();
-            if (bg != null) bg.color = background;
-            Transform head = rig.head;
-            Vector3 fwd = rig.FlatForward;
-            Vector3 pos = head.position + fwd * 0.75f;
-            pos.y = head.position.y - 0.15f;
-            successPanel.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(fwd, Vector3.up));
-        }
-
-        /// <summary>Too much radiation: show a red screen, then restart automatically.</summary>
-        void Fail()
-        {
-            finished = true;
-            failed = true;
-            restartTimer = failRestartDelay;
-            sfx.PlayOneShot(errorClip);
-            SetStatus("ได้รับรังสีเกินขีดจำกัด! กำลังเริ่มใหม่...", 0f);
-            if (successPanel != null) ShowPanel(failColor);
-            UpdateFailText();
-        }
-
-        void UpdateFailText()
-        {
-            if (successText == null) return;
-            float dose = radiation != null ? radiation.TotalDose : 0f;
-            successText.text =
-                "<size=96><color=#FF5A4A>ล้มเหลว: ได้รับรังสีเกิน</color></size>\n\n" +
-                $"รังสีสะสม {dose:0.0} µSv  (ขีดจำกัด {doseLimit:0} µSv)\n\n" +
-                "อย่าอยู่ใกล้จุดรั่วนาน  ใส่ชุด กินยา และปิดพัดลมก่อนฝ่าออกไป\n\n" +
-                $"<size=40><color=#FFD54A>เริ่มใหม่ใน {Mathf.CeilToInt(Mathf.Max(restartTimer, 0f))} วินาที...</color></size>";
+            if (fadeImage == null) return;
+            var c = fadeImage.color; c.a = a;
+            fadeImage.color = c;
+            fadeImage.enabled = a > 0.001f;
         }
 
         // ---------------------------------------------------------------- update
 
         void Update()
         {
-            if (!finished) elapsed += Time.deltaTime;
+            if (finished) return;
+            elapsed += Time.deltaTime;
 
-            // over the limit -> fail, then restart by itself
-            if (!finished && radiation != null && radiation.TotalDose >= doseLimit) Fail();
-            if (failed)
-            {
-                restartTimer -= Time.deltaTime;
-                UpdateFailText();
-                if (restartTimer <= 0f) { ResetGame(); return; }
-            }
+            if (radiation != null && radiation.TotalDose >= lethalDose) { Die(); return; }
 
-            if (!finished && rig != null && exitPoint != null)
+            if (rig != null && exitPoint != null)
             {
                 Vector3 a = rig.head.position; a.y = 0f;
                 Vector3 b = exitPoint.position; b.y = 0f;
                 if (Vector3.Distance(a, b) < exitRadius)
                 {
-                    if (PrepDone()) Win();
-                    else if (statusTimer <= 0f)
+                    if (PrepDone()) { Win(); return; }
+                    if (statusTimer <= 0f)
                     {
-                        SetStatus($"อันตราย! ยังเตรียมตัวไม่ครบ – ทำ Step {FirstUndone() + 1} ก่อนออกจากห้อง", 3f);
+                        SetStatus($"ประตูยังไม่เปิด! เตรียมตัวไม่ครบ – ทำ Step {FirstUndone() + 1} ก่อน (และอย่ายืนในโซนรังสีนาน!)", 3f);
                         sfx.PlayOneShot(errorClip);
                     }
                 }
@@ -279,11 +333,10 @@ namespace RadiationShowcase
             if (statusTimer > 0f)
             {
                 statusTimer -= Time.deltaTime;
-                if (statusTimer <= 0f && !finished) SetStatus(DefaultStatus, 0f);
+                if (statusTimer <= 0f) SetStatus(DefaultStatus, 0f);
             }
 
             UpdateHighlights();
-            UpdateHud();
         }
 
         void UpdateHighlights()
@@ -291,22 +344,11 @@ namespace RadiationShowcase
             if (interactables == null || interactableIds == null) return;
             int current = FirstUndone();
             string currentId = current < steps.Length ? steps[current].id : null;
+            // the axe belongs to the Geiger step
             for (int i = 0; i < interactables.Length && i < interactableIds.Length; i++)
                 if (interactables[i] != null)
-                    interactables[i].highlighted = !finished && interactableIds[i] == currentId;
-        }
-
-        void UpdateHud()
-        {
-            if (hudText == null || radiation == null) return;
-            string zone = radiation.InDanger
-                ? "<color=#FF4040>!! อยู่ในโซนรังสี !!</color>"
-                : radiation.CurrentDoseRate > 20f ? "<color=#FFC040>ระวัง: ใกล้จุดรั่ว</color>"
-                : "<color=#60FF90>ระดับปลอดภัย</color>";
-            hudText.text =
-                $"รังสี {radiation.CurrentDoseRate:0.0} µSv/h\n" +
-                $"สะสม {radiation.TotalDose:0.0} / {doseLimit:0} µSv\n" +
-                $"ชุด: {(IsDone("suit") ? "ใส่แล้ว" : "-")}   ยา: {(IsDone("pill") ? "กินแล้ว" : "-")}\n{zone}";
+                    interactables[i].highlighted = interactableIds[i] == currentId &&
+                                                   !(interactables[i] is GeigerCounter gc && gc.locked);
         }
 
         void RefreshBoard()
@@ -317,11 +359,12 @@ namespace RadiationShowcase
             for (int i = 0; i < steps.Length; i++)
             {
                 if (done[i])
-                    sb.Append($"<color=#5CFF8A>Step {i + 1}: {steps[i].title}  (เสร็จแล้ว)</color>\n\n");
+                    sb.Append($"<color=#5CFF8A>Step {i + 1}: {steps[i].title}  (เสร็จแล้ว)</color>\n");
                 else if (i == current)
-                    sb.Append($"<color=#FFD54A>> Step {i + 1}: {steps[i].title}</color>\n<size=34>   {steps[i].howTo}</size>\n\n");
+                    sb.Append($"<color=#FFD54A>> Step {i + 1}: {steps[i].title}</color>\n<size=32>   {steps[i].howTo}</size>\n");
                 else
-                    sb.Append($"<color=#999999>Step {i + 1}: {steps[i].title}</color>\n\n");
+                    sb.Append($"<color=#999999>Step {i + 1}: {steps[i].title}</color>\n");
+                sb.Append('\n');
             }
             boardSteps.text = sb.ToString();
         }

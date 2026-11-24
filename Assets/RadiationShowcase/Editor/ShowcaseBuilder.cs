@@ -24,7 +24,7 @@ public static class ShowcaseBuilder
 
     // materials
     static Material mFloor, mWall, mCeiling, mMetal, mDark, mYellow, mOrangeBtn, mBlue, mRed, mGreenPath,
-        mDanger, mVentGlow, mExit, mLamp, mBoard, mHand, mParticle, mSuit, mVisor, mPill, mCap, mLine, mReticle;
+        mDanger, mVentGlow, mExit, mLamp, mBoard, mHand, mParticle, mSuit, mVisor, mPill, mCap, mLine, mReticle, mGlass, mAxeHandle;
 
     [MenuItem("Tools/Radiation Showcase/Build VR Scene")]
     public static void Build()
@@ -100,7 +100,7 @@ public static class ShowcaseBuilder
         var ps = CreateParticles(vent);
 
         rad.dangerRadius = 2.6f;
-        rad.beepRange = 7f;
+        rad.range = 7f;
         rad.particles = ps;
         rad.glowLight = glow;
         rad.fanBlades = blades;
@@ -136,6 +136,7 @@ public static class ShowcaseBuilder
         suitRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         suitRb.isKinematic = true;
         var suit = suitGo.AddComponent<WearableItem>();
+        suit.gripPoint = Grip(st, new Vector3(0, 0.3f, 0), Vector3.forward, Vector3.up);
         suit.startKinematic = true;
         suit.actionId = "suit";
 
@@ -181,7 +182,10 @@ public static class ShowcaseBuilder
         pillRb.mass = 0.2f;
         pillRb.interpolation = RigidbodyInterpolation.Interpolate;
         pillRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        pillRb.isKinematic = true;
         var pill = pillGo.AddComponent<ConsumableItem>();
+        pill.startKinematic = true;   // stays put on the table until picked up (also after a reset)
+        pill.gripPoint = Grip(pillGo.transform, Vector3.zero, Vector3.forward, Vector3.up);
         pill.actionId = "pill";
         pill.glowRenderers = new[] { pillGo.GetComponent<Renderer>(), cap.GetComponent<Renderer>() };
 
@@ -202,11 +206,11 @@ public static class ShowcaseBuilder
         exitLight.type = LightType.Point; exitLight.range = 4f; exitLight.intensity = 1.5f;
         exitLight.color = new Color(0.3f, 1f, 0.45f); exitLight.shadows = LightShadows.None;
 
-        // ------------------------------------------------------------ guide path (green): suit -> lever -> pills -> through the leak -> exit
+        // ------------------------------------------------------------ guide path (green): case -> suit -> lever -> pills -> through the leak -> exit
         var path = new GameObject("GuidePath").transform;
         var pts = new[]
         {
-            new Vector3(-2.4f, 0, -0.6f), new Vector3(-3.0f, 0, -1.0f), new Vector3(0.6f, 0, 2.3f),
+            new Vector3(-2.4f, 0, -0.6f), new Vector3(-3.2f, 0, 0.8f), new Vector3(-3.0f, 0, -1.0f), new Vector3(0.6f, 0, 2.3f),
             new Vector3(0.8f, 0, -1.9f), new Vector3(3.3f, 0, 1.8f)
         };
         for (int i = 0; i < pts.Length - 1; i++) Strip(path, pts[i], pts[i + 1], 0.12f, mGreenPath);
@@ -224,7 +228,7 @@ public static class ShowcaseBuilder
             new Vector2(1900, 1300), 0.001f, null);
         AddText(boardCanvas, "Title", new Vector2(0.03f, 0.88f), new Vector2(0.97f, 0.98f), 70,
             new Color(1f, 0.85f, 0.25f), TextAnchor.MiddleLeft).text = "คู่มือเอาตัวรอด: รังสีรั่วไหลที่ประตูทางออก";
-        var stepsText = AddText(boardCanvas, "Steps", new Vector2(0.04f, 0.30f), new Vector2(0.96f, 0.87f), 42,
+        var stepsText = AddText(boardCanvas, "Steps", new Vector2(0.04f, 0.30f), new Vector2(0.96f, 0.87f), 38,
             Color.white, TextAnchor.UpperLeft);
         stepsText.text = "Step 1 ...";
         var statusText = AddText(boardCanvas, "Status", new Vector2(0.04f, 0.18f), new Vector2(0.96f, 0.29f), 38,
@@ -232,8 +236,8 @@ public static class ShowcaseBuilder
         AddText(boardCanvas, "Controls", new Vector2(0.04f, 0.01f), new Vector2(0.74f, 0.17f), 26,
             new Color(0.75f, 0.75f, 0.75f), TextAnchor.MiddleLeft).text =
             "VR (แบบ H3VR): สติ๊กซ้าย = เดิน, กดสติ๊กซ้าย = เปิด/ปิดวิ่ง | สติ๊กขวาซ้าย-ขวา = หมุน 45° | สติ๊กขวาดันขึ้น = เล็งวาร์ป ปล่อย = วาร์ป\n" +
-            "Grip ค้าง = จับ/ถือ | เอามือจิ้มปุ่ม = กด | Y = เปิด/ปิดคู่มือ | B = รีเซ็ต\n" +
-            "PC: คลิกเพื่อล็อกเมาส์ | WASD, Shift = เปิด/ปิดวิ่ง | คลิกขวาค้าง = เล็งวาร์ป | คลิกซ้ายค้าง = จับ | F ค้าง = เอาเข้าตัว/ปาก | H = คู่มือ | R = รีเซ็ต";
+            "Grip ค้าง = จับ/ถือ | ชี้ของไกล + Trigger + Grip = ดูดของเข้ามือ | เอามือจิ้มปุ่ม = กด | Y = คู่มือ | B = รีเซ็ต | Menu = หยุดเกม\n" +
+            "PC: คลิกล็อกเมาส์ | WASD, Shift = วิ่ง | คลิกขวาค้าง = วาร์ป | คลิกซ้ายค้าง = จับ | F = เข้าตัว/ปาก | Space = เหวี่ยงขวาน | G = วาง Geiger | H = คู่มือ | R = รีเซ็ต | Esc = หยุดเกม";
         var boardResetGo = Box("Button_Reset", boardGrp, new Vector3(0.75f, 1.12f, -0.05f), new Vector3(0.32f, 0.14f, 0.06f), mRed);
         var boardReset = boardResetGo.AddComponent<WorldButton>();
         boardReset.id = "reset";
@@ -241,47 +245,135 @@ public static class ShowcaseBuilder
         Label("ResetLabel", boardGrp, new Vector3(0.75f, 1.12f, -0.085f), Quaternion.identity,
             "RESET", 70, Color.white, new Vector2(320, 140), 0.001f);
 
-        // ------------------------------------------------------------ success panel (appears ~0.75 m in front of the player)
-        var successCanvas = MakeCanvas("SuccessPanel", null, new Vector3(0, 1.5f, 0), Quaternion.identity,
-            new Vector2(1200, 760), 0.0007f, new Color(0.02f, 0.12f, 0.06f, 0.92f));
-        var successText = AddText(successCanvas, "SuccessText", new Vector2(0.04f, 0.28f), new Vector2(0.96f, 0.96f), 46,
-            Color.white, TextAnchor.MiddleCenter);
-        successText.text = "สำเร็จ / ปลอดภัย";
-        var successResetGo = Box("Button_Reset", successCanvas, new Vector3(0, -270, -50), new Vector3(360, 130, 70), mRed);
-        var successReset = successResetGo.AddComponent<WorldButton>();
-        successReset.id = "reset";
-        successReset.emissionColor = new Color(1f, 0.2f, 0.2f);
-        Label("ResetLabel", successCanvas, new Vector3(0, -270, -90), Quaternion.identity,
-            "RESET", 80, Color.white, new Vector2(360, 130), 1f);
-        successCanvas.gameObject.SetActive(false);
+        // ------------------------------------------------------------ emergency case with the Geiger counter (west wall)
+        var caseGrp = new GameObject("Step1_EmergencyCase (break the glass)").transform;
+        caseGrp.SetPositionAndRotation(new Vector3(-3.92f, 0, 0.8f), Quaternion.Euler(0, 90, 0)); // local +Z = into the room
+        Box("CaseBack", caseGrp, new Vector3(0, 1.3f, 0), new Vector3(0.7f, 0.62f, 0.04f), mRed);
+        Box("Frame_L", caseGrp, new Vector3(-0.33f, 1.3f, 0.14f), new Vector3(0.04f, 0.62f, 0.28f), mRed);
+        Box("Frame_R", caseGrp, new Vector3(0.33f, 1.3f, 0.14f), new Vector3(0.04f, 0.62f, 0.28f), mRed);
+        Box("Frame_T", caseGrp, new Vector3(0, 1.59f, 0.14f), new Vector3(0.7f, 0.04f, 0.28f), mRed);
+        Box("Frame_B", caseGrp, new Vector3(0, 1.01f, 0.14f), new Vector3(0.7f, 0.04f, 0.28f), mRed);
+        Box("Bracket", caseGrp, new Vector3(0, 1.3f, 0.05f), new Vector3(0.12f, 0.2f, 0.06f), mDark, false);
+        var pane = Box("GlassPane", caseGrp, new Vector3(0, 1.3f, 0.27f), new Vector3(0.62f, 0.54f, 0.012f), mGlass);
+        Label("CaseSign", caseGrp, new Vector3(0, 1.8f, 0.05f), Quaternion.Euler(0, 180, 0),
+            "STEP 1  EMERGENCY\nทุบกระจกเพื่อหยิบ Geiger Counter", 48, Color.white, new Vector2(1000, 220), 0.001f,
+            new Color(0.7f, 0.05f, 0.05f, 0.95f));
+
+        var geiger = BuildGeigerCounter(rad);
+        geiger.transform.SetPositionAndRotation(caseGrp.TransformPoint(0, 1.3f, 0.14f),
+            caseGrp.rotation * Quaternion.LookRotation(Vector3.up, Vector3.forward)); // probe up, display facing out of the case
+
+        // ------------------------------------------------------------ fire axe on the wall next to the case
+        var axeMount = new GameObject("FireAxeMount").transform;
+        axeMount.SetPositionAndRotation(new Vector3(-3.92f, 0, 1.7f), Quaternion.Euler(0, 90, 0));
+        Box("MountPlate", axeMount, new Vector3(0, 1.3f, 0), new Vector3(0.35f, 0.95f, 0.02f), mRed, false);
+        Label("AxeSign", axeMount, new Vector3(0, 1.9f, 0.02f), Quaternion.Euler(0, 180, 0),
+            "FIRE AXE\nขวานดับเพลิง", 44, Color.white, new Vector2(420, 160), 0.001f, new Color(0.6f, 0.05f, 0.05f, 0.95f));
+        var axeGo = new GameObject("FireAxe (grab + swing at the glass)");
+        axeGo.transform.SetPositionAndRotation(axeMount.TransformPoint(0, 1.3f, 0.06f), axeMount.rotation);
+        var ax = axeGo.transform;
+        var handle = Box("Handle", ax, Vector3.zero, new Vector3(0.035f, 0.4f, 0.035f), mAxeHandle, false, PrimitiveType.Cylinder);
+        var headBox = Box("Head", ax, new Vector3(0.03f, 0.37f, 0), new Vector3(0.16f, 0.08f, 0.03f), mMetal, false);
+        var blade = Box("Blade", ax, new Vector3(0.12f, 0.37f, 0), new Vector3(0.05f, 0.14f, 0.012f), mMetal, false);
+        Box("Pick", ax, new Vector3(-0.08f, 0.37f, 0), new Vector3(0.08f, 0.025f, 0.02f), mDark, false);
+        var axeHead = new GameObject("HeadPoint").transform;
+        axeHead.SetParent(ax, false);
+        axeHead.localPosition = new Vector3(0.14f, 0.37f, 0);
+        var axeCol = axeGo.AddComponent<BoxCollider>();
+        axeCol.center = new Vector3(0.02f, 0.02f, 0);
+        axeCol.size = new Vector3(0.3f, 0.84f, 0.06f);
+        var axeRb = axeGo.AddComponent<Rigidbody>();
+        axeRb.mass = 1.5f;
+        axeRb.interpolation = RigidbodyInterpolation.Interpolate;
+        axeRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        axeRb.isKinematic = true;
+        var axe = axeGo.AddComponent<Grabbable>();
+        axe.gripPoint = Grip(ax, new Vector3(0, -0.28f, 0), Vector3.up, Vector3.left);
+        axe.startKinematic = true;
+        axe.glowRenderers = new[] { handle.GetComponent<Renderer>(), headBox.GetComponent<Renderer>(), blade.GetComponent<Renderer>() };
+
+        var glass = caseGrp.gameObject.AddComponent<BreakableGlass>();
+        glass.axe = axe;
+        glass.axeHead = axeHead;
+        glass.geiger = geiger;
+        glass.pane = pane;
+        glass.shardMaterial = mGlass;
 
         // ------------------------------------------------------------ handbook (Y button)
         var handbook = BuildHandbook();
 
         // ------------------------------------------------------------ player rig
-        var interactables = new Grabbable[] { suit, leverHandle, pill };
-        var rig = BuildRig(start, interactables, out Text hudText);
+        var interactables = new Grabbable[] { geiger, axe, suit, leverHandle, pill };
+        var rig = BuildRig(start, interactables);
         rad.listener = rig.head;
         rig.handbook = handbook;
-        BuildGeigerCounter(rig, rad);
+        var cam = rig.head.GetComponent<Camera>();
 
-        // ------------------------------------------------------------ post processing
-        BuildVolume();
+        // ------------------------------------------------------------ fade overlay (child of the camera) + end message (UI layer)
+        var fadeCanvas = MakeCanvas("FadeOverlay", rig.head, new Vector3(0, 0, 0.1f), Quaternion.identity,
+            new Vector2(1000, 1000), 0.0004f, null);
+        var fadeGo = new GameObject("Black", typeof(RectTransform), typeof(Image));
+        var fadeRt = (RectTransform)fadeGo.transform;
+        fadeRt.SetParent(fadeCanvas, false);
+        Stretch(fadeRt, Vector2.zero, Vector2.one, 0);
+        var fadeImage = fadeGo.GetComponent<Image>();
+        fadeImage.color = new Color(0, 0, 0, 0);
+        fadeImage.raycastTarget = false;
+        fadeImage.enabled = false;
+
+        var endPanel = MakeCanvas("EndMessage (UI layer)", null, new Vector3(0, 1.5f, 0), Quaternion.identity,
+            new Vector2(1500, 1000), 0.0009f, null);
+        var endText = AddText(endPanel, "EndText", new Vector2(0.03f, 0.2f), new Vector2(0.97f, 0.97f), 44,
+            Color.white, TextAnchor.MiddleCenter);
+        endText.text = "END";
+        foreach (var (btnId, btnLabel, btnX, btnMat, btnGlow) in new[]
+        {
+            ("restart", "เริ่มใหม่", -300f, mOrangeBtn, new Color(1f, 0.6f, 0.1f)),
+            ("quit", "ออกจากเกม", 300f, mRed, new Color(1f, 0.2f, 0.2f)),
+        })
+        {
+            var btnGo = Box("Button_" + btnId, endPanel, new Vector3(btnX, -400, -40), new Vector3(520, 140, 60), btnMat);
+            var btn = btnGo.AddComponent<WorldButton>();
+            btn.id = btnId;
+            btn.emissionColor = btnGlow;
+            Label("Label_" + btnId, endPanel, new Vector3(btnX, -400, -75), Quaternion.identity,
+                btnLabel, 72, Color.white, new Vector2(520, 140), 1f);
+        }
+        SetLayerRecursive(endPanel.gameObject, 5);
+        endPanel.gameObject.SetActive(false);
+
+        // ------------------------------------------------------------ post processing (+ "blacking out" with dose)
+        var volume = BuildVolume();
 
         // ------------------------------------------------------------ game flow
-        var flow = new GameObject("GameFlow").AddComponent<GameFlow>();
+        var flowGo = new GameObject("GameFlow");
+        var exposure = flowGo.AddComponent<ExposureEffects>();
+        exposure.volume = volume;
+        exposure.radiation = rad;
+        var flow = flowGo.AddComponent<GameFlow>();
         flow.rig = rig;
         flow.radiation = rad;
+        flow.exposureEffects = exposure;
+        flow.glass = glass;
         flow.startPoint = start;
         flow.exitPoint = exitPoint;
         flow.interactables = interactables;
-        flow.interactableIds = new[] { "suit", "fan", "pill" };
+        flow.interactableIds = new[] { "geiger", "geiger", "suit", "fan", "pill" };
         flow.fanStatusLabel = fanLabel;
         flow.boardSteps = stepsText;
         flow.boardStatus = statusText;
-        flow.hudText = hudText;
-        flow.successPanel = successCanvas.gameObject;
-        flow.successText = successText;
+        flow.playerCamera = cam;
+        flow.fadeImage = fadeImage;
+        flow.endPanel = endPanel.gameObject;
+        flow.endText = endText;
+
+        // ------------------------------------------------------------ pause menu (Menu button / Esc)
+        var pause = flowGo.AddComponent<PauseMenu>();
+        pause.rig = rig;
+        pause.flow = flow;
+        pause.panel = BuildPausePanel();
+        pause.mainPanel = BuildMainMenuPanel();
+
         flow.allTexts = texts.ToArray();
 
         EditorSceneManager.SaveScene(scene, ScenePath);
@@ -290,13 +382,84 @@ public static class ShowcaseBuilder
         Debug.Log($"[Radiation Showcase] Scene built: {ScenePath}");
     }
 
+    // ================================================================= pause menu
+
+    static GameObject BuildPausePanel()
+    {
+        // 900 x 1000 px at 0.0009 m/px = 0.81 x 0.9 m, ~1.4 m in front of the player (laser pointer in VR)
+        var panel = MakeCanvas("PauseMenu", null, new Vector3(0, 1.4f, 0), Quaternion.identity,
+            new Vector2(900, 1000), 0.0009f, new Color(0.03f, 0.04f, 0.06f, 0.96f));
+
+        AddText(panel, "Title", new Vector2(0.05f, 0.83f), new Vector2(0.95f, 0.97f), 80,
+            new Color(1f, 0.85f, 0.25f), TextAnchor.MiddleCenter).text = "หยุดเกมชั่วคราว";
+
+        void MakeButton(string id, string label, float y, Material mat, Color glow)
+        {
+            var go = Box("Button_" + id, panel, new Vector3(0, y, -40), new Vector3(620, 150, 60), mat);
+            var b = go.AddComponent<WorldButton>();
+            b.id = id;
+            b.emissionColor = glow;
+            Label("Label_" + id, panel, new Vector3(0, y, -75), Quaternion.identity,
+                label, 72, Color.white, new Vector2(620, 150), 1f);
+        }
+        MakeButton("resume", "เล่นต่อ", 220, mGreenPath, new Color(0.2f, 1f, 0.4f));
+        MakeButton("restart", "เริ่มใหม่", 20, mOrangeBtn, new Color(1f, 0.6f, 0.1f));
+        MakeButton("quit", "ออกจากเกม", -180, mRed, new Color(1f, 0.2f, 0.2f));
+
+        AddText(panel, "Hint", new Vector2(0.05f, 0.02f), new Vector2(0.95f, 0.15f), 32,
+            new Color(0.7f, 0.7f, 0.7f), TextAnchor.MiddleCenter).text =
+            "VR: ชี้เลเซอร์ที่ปุ่มแล้วกด Trigger  |  กดปุ่ม Menu อีกครั้ง = เล่นต่อ\nPC: คลิกที่ปุ่ม  |  Esc = เล่นต่อ";
+
+        SetLayerRecursive(panel.gameObject, 5);
+        panel.gameObject.SetActive(false);
+        return panel.gameObject;
+    }
+
+    // ================================================================= main menu (title screen)
+
+    static GameObject BuildMainMenuPanel()
+    {
+        // 1100 x 1050 px at 0.001 m/px = 1.1 x 1.05 m, ~1.4 m in front of the player (laser pointer in VR)
+        var panel = MakeCanvas("MainMenu (title screen)", null, new Vector3(0, 1.4f, 0), Quaternion.identity,
+            new Vector2(1100, 1050), 0.001f, new Color(0.02f, 0.03f, 0.04f, 0.97f));
+
+        AddText(panel, "Warning", new Vector2(0.05f, 0.88f), new Vector2(0.95f, 0.97f), 40,
+            new Color(1f, 0.35f, 0.25f), TextAnchor.MiddleCenter).text = "!! RADIATION HAZARD !!";
+        AddText(panel, "Title", new Vector2(0.04f, 0.62f), new Vector2(0.96f, 0.88f), 96,
+            new Color(1f, 0.85f, 0.2f), TextAnchor.MiddleCenter).text = "How to survive:\nRadiation Leak";
+        AddText(panel, "Subtitle", new Vector2(0.05f, 0.53f), new Vector2(0.95f, 0.62f), 46,
+            new Color(0.75f, 1f, 0.75f), TextAnchor.MiddleCenter).text = "เอาชีวิตรอดจากรังสีรั่วไหล";
+
+        var startGo = Box("Button_start", panel, new Vector3(0, -40, -40), new Vector3(640, 150, 60), mGreenPath);
+        var startBtn = startGo.AddComponent<WorldButton>();
+        startBtn.id = "start";
+        startBtn.emissionColor = new Color(0.2f, 1f, 0.4f);
+        Label("Label_start", panel, new Vector3(0, -40, -75), Quaternion.identity,
+            "เริ่มเกม", 80, Color.white, new Vector2(640, 150), 1f);
+
+        var quitGo = Box("Button_quit", panel, new Vector3(0, -230, -40), new Vector3(640, 150, 60), mRed);
+        var quitBtn = quitGo.AddComponent<WorldButton>();
+        quitBtn.id = "quit";
+        quitBtn.emissionColor = new Color(1f, 0.2f, 0.2f);
+        Label("Label_quit", panel, new Vector3(0, -230, -75), Quaternion.identity,
+            "ออกจากเกม", 80, Color.white, new Vector2(640, 150), 1f);
+
+        AddText(panel, "Hint", new Vector2(0.05f, 0.02f), new Vector2(0.95f, 0.13f), 32,
+            new Color(0.7f, 0.7f, 0.7f), TextAnchor.MiddleCenter).text =
+            "VR: ชี้เลเซอร์ที่ปุ่มแล้วกด Trigger   |   PC: คลิกที่ปุ่ม";
+
+        SetLayerRecursive(panel.gameObject, 5);
+        panel.gameObject.SetActive(false);
+        return panel.gameObject;
+    }
+
     // ================================================================= handbook
 
     static GameObject BuildHandbook()
     {
         // 1300 x 1550 px at 0.0007 m/px = about 0.9 x 1.1 m, floating ~0.9 m in front of the player
         var panel = MakeCanvas("Handbook (Y)", null, new Vector3(0, 1.5f, 0), Quaternion.identity,
-            new Vector2(1300, 1550), 0.0007f, new Color(0.04f, 0.05f, 0.07f, 0.95f));
+            new Vector2(1300, 1750), 0.0007f, new Color(0.04f, 0.05f, 0.07f, 0.95f));
 
         AddText(panel, "Title", new Vector2(0.04f, 0.93f), new Vector2(0.96f, 0.99f), 54,
             new Color(1f, 0.85f, 0.25f), TextAnchor.MiddleLeft).text =
@@ -307,7 +470,7 @@ public static class ShowcaseBuilder
         const string R = "<color=#FF8A6A>";
         const string E = "</color>";
 
-        AddText(panel, "Body", new Vector2(0.04f, 0.02f), new Vector2(0.96f, 0.92f), 29,
+        AddText(panel, "Body", new Vector2(0.04f, 0.01f), new Vector2(0.96f, 0.92f), 26,
             Color.white, TextAnchor.UpperLeft).text =
             $"{H}1) ชุดป้องกันรังสี{E}   {G}ในเกม: ลดรังสีที่ได้รับ 60%{E}\n" +
             "ทำงานยังไง: กันฝุ่นและอนุภาคกัมมันตรังสีไม่ให้ติดผิวหนังและเสื้อผ้า และกันรังสีแอลฟากับเบตาได้บางส่วน\n" +
@@ -329,11 +492,12 @@ public static class ShowcaseBuilder
             "• ระยะทาง: ยิ่งห่างจุดรั่ว รังสียิ่งลดลงเร็ว (แหล่งรังสีแบบจุด ห่างขึ้น 2 เท่า เหลือประมาณ 1/4)\n" +
             "• ที่กำบัง: ผนังหรือวัสดุหนาที่อยู่ระหว่างตัวเรากับแหล่งรังสีช่วยลดรังสีได้\n\n" +
 
-            $"{H}5) อ่านค่า Geiger Counter (ที่ข้อมือซ้าย){E}\n" +
-            "CPS = จำนวนคลิกต่อวินาที  ยิ่งคลิกถี่ = ยิ่งใกล้แหล่งรังสี\n" +
-            $"{G}เขียว ต่ำกว่า 20{E} ปลอดภัย   <color=#FFC040>เหลือง 20-100{E} ระวัง   <color=#FF4A3A>แดง เกิน 100{E} อันตราย\n" +
-            $"{R}ขีดจำกัด: ถ้ารังสีสะสมเกิน 25 µSv (ดูที่ HUD เหนือมือซ้าย) จะล้มเหลวและต้องเริ่มใหม่{E}\n\n" +
-            "<size=24><color=#888888>* ตัวเลข % และค่ารังสีในเกมปรับให้เข้าใจง่ายสำหรับการสาธิต ไม่ใช่ค่าจริงทางการแพทย์</color></size>";
+            $"{H}5) Geiger Counter (ทุบตู้กระจกฉุกเฉินแล้วถือไว้){E}\n" +
+            "ค่ารังสีดูได้จากเครื่องเท่านั้น: บรรทัดใหญ่ = อัตรารังสีตรงหัววัด (Sv/h)  DOSE = รังสีที่ร่างกายรับสะสม\n" +
+            "เสียงคลิกยิ่งถี่ = ยิ่งใกล้จุดรั่ว  ถ้าขอบตาเริ่มมืด = ร่างกายรับรังสีมากแล้ว\n\n" +
+            $"{H}6) ปริมาณรังสีกับผลต่อร่างกาย (รับทั้งตัวในครั้งเดียว){E}\n" +
+            "<size=26>" + RadiationEffects.HandbookTable + "</size>\n\n" +
+            "<size=22><color=#888888>* ระดับอาการอ้างอิงแนวทางของ CDC เรื่องกลุ่มอาการป่วยจากรังสีเฉียบพลัน (ARS); ความแรงของจุดรั่วและ % การป้องกันในเกมปรับเพื่อการสาธิต</color></size>";
 
         panel.gameObject.SetActive(false);
         return panel.gameObject;
@@ -341,7 +505,7 @@ public static class ShowcaseBuilder
 
     // ================================================================= rig
 
-    static ShowcaseRig BuildRig(Transform start, Grabbable[] items, out Text hudText)
+    static ShowcaseRig BuildRig(Transform start, Grabbable[] items)
     {
         var root = new GameObject("Player Rig (VR + Desktop)");
         root.transform.SetPositionAndRotation(start.position, start.rotation);
@@ -404,25 +568,17 @@ public static class ShowcaseBuilder
         rig.crosshair = Label("Crosshair", root.transform, Vector3.zero, Quaternion.identity,
             "+", 60, Color.white, new Vector2(80, 80), 0.0005f).transform.parent;
 
-        var hud = MakeCanvas("HUD_Status", root.transform, Vector3.zero, Quaternion.identity,
-            new Vector2(380, 230), 0.0007f, new Color(0, 0, 0, 0.7f));
-        hudText = AddText(hud, "HudText", new Vector2(0.05f, 0.03f), new Vector2(0.95f, 0.97f), 30,
-            Color.white, TextAnchor.MiddleLeft);
-        hudText.text = "สถานะ";
-        rig.hud = hud;
-
         return rig;
     }
     // ================================================================= geiger counter
 
-    static GeigerCounter BuildGeigerCounter(ShowcaseRig rig, RadiationSource rad)
+    static GeigerCounter BuildGeigerCounter(RadiationSource rad)
     {
-        var root = new GameObject("GeigerCounter");
-        root.transform.SetParent(rig.transform, false);
+        var root = new GameObject("GeigerCounter (grab + hold)");
         var dev = root.transform;
 
         // body: probe points forward (+z), display on top (+y)
-        Box("Body", dev, Vector3.zero, new Vector3(0.085f, 0.055f, 0.15f), mYellow, false);
+        var body = Box("Body", dev, Vector3.zero, new Vector3(0.085f, 0.055f, 0.15f), mYellow, false);
         Box("Grip", dev, new Vector3(0, -0.05f, -0.02f), new Vector3(0.035f, 0.05f, 0.07f), mDark, false);
         Box("Speaker", dev, new Vector3(0.0435f, 0, -0.03f), new Vector3(0.003f, 0.03f, 0.05f), mDark, false);
         var probe = Box("Probe", dev, new Vector3(0, 0, 0.125f), new Vector3(0.03f, 0.05f, 0.03f), mMetal, false, PrimitiveType.Cylinder);
@@ -433,13 +589,16 @@ public static class ShowcaseBuilder
         tip.localPosition = new Vector3(0, 0, 0.18f);
         Box("Bezel", dev, new Vector3(0, 0.0285f, -0.005f), new Vector3(0.072f, 0.004f, 0.11f), mDark, false);
 
-        // display: 700 x 1000 px -> 7 x 10 cm, lying on the top face, text "up" toward the probe
+        // display: 640 x 1000 px -> 6.4 x 10 cm, lying on the top face, text "up" toward the probe
         var disp = MakeCanvas("Display", dev, new Vector3(0, 0.031f, -0.005f), Quaternion.Euler(90, 0, 0),
             new Vector2(640, 1000), 0.0001f, new Color(0.05f, 0.09f, 0.06f, 1f));
 
-        var title = AddText(disp, "Title", new Vector2(0.05f, 0.88f), new Vector2(0.8f, 0.98f), 60,
-            new Color(1f, 0.85f, 0.3f), TextAnchor.MiddleLeft);
-        title.text = "GEIGER";
+        AddText(disp, "Title", new Vector2(0.05f, 0.88f), new Vector2(0.8f, 0.98f), 60,
+            new Color(1f, 0.85f, 0.3f), TextAnchor.MiddleLeft).text = "GEIGER";
+        var alarm = AddText(disp, "Alarm", new Vector2(0.05f, 0.78f), new Vector2(0.95f, 0.87f), 56,
+            new Color(1f, 0.25f, 0.2f), TextAnchor.MiddleCenter);
+        alarm.text = "!! DANGER !!";
+        alarm.enabled = false;
 
         var ledGo = new GameObject("LED", typeof(RectTransform), typeof(Image));
         var ledRt = (RectTransform)ledGo.transform;
@@ -448,30 +607,33 @@ public static class ShowcaseBuilder
         ledRt.sizeDelta = new Vector2(60, 60);
         var led = ledGo.GetComponent<Image>();
 
-        // analog meter: pivot near the middle, scale marks on an arc (log scale 0 / 10 / 100 / 1k)
-        var pivotPos = new Vector2(0f, -120f); // relative to canvas centre
-        string[] marks = { "0", "10", "100", "1k" };
-        float[] angles = { -60f, -20f, 20f, 60f };
+        // analog meter, log scale in Sv/h: 1µ / 1m / 1 / 1k
+        var pivotPos = new Vector2(0f, -60f);
+        string[] marks = { "1µ", "1m", "1", "1k" };
+        float[] angles = { -49f, -16f, 16f, 49f };
         for (int i = 0; i < marks.Length; i++)
         {
-            var m = new GameObject("Mark_" + marks[i], typeof(RectTransform), typeof(Text));
+            var m = new GameObject("Mark_" + i, typeof(RectTransform), typeof(Text));
             var mrt = (RectTransform)m.transform;
             mrt.SetParent(disp, false);
-            mrt.sizeDelta = new Vector2(120, 70);
-            float rad2 = angles[i] * Mathf.Deg2Rad;
-            mrt.anchoredPosition = pivotPos + new Vector2(Mathf.Sin(rad2), Mathf.Cos(rad2)) * 330f;
+            mrt.sizeDelta = new Vector2(130, 70);
+            float a = angles[i] * Mathf.Deg2Rad;
+            mrt.anchoredPosition = pivotPos + new Vector2(Mathf.Sin(a), Mathf.Cos(a)) * 300f;
             var mt = m.GetComponent<Text>();
-            mt.font = editorFont; mt.fontSize = 50; mt.alignment = TextAnchor.MiddleCenter;
-            mt.color = i == 3 ? new Color(1f, 0.35f, 0.3f) : new Color(0.8f, 1f, 0.8f);
+            mt.font = editorFont; mt.fontSize = 48; mt.alignment = TextAnchor.MiddleCenter;
+            mt.color = i >= 2 ? new Color(1f, 0.35f, 0.3f) : new Color(0.8f, 1f, 0.8f);
             mt.text = marks[i];
             texts.Add(mt);
         }
+        var unit = AddText(disp, "Unit", new Vector2(0.35f, 0.40f), new Vector2(0.65f, 0.46f), 36,
+            new Color(0.7f, 0.8f, 0.7f), TextAnchor.MiddleCenter);
+        unit.text = "Sv/h";
 
         var needleGo = new GameObject("Needle", typeof(RectTransform), typeof(Image));
         var needle = (RectTransform)needleGo.transform;
         needle.SetParent(disp, false);
         needle.pivot = new Vector2(0.5f, 0f);
-        needle.sizeDelta = new Vector2(10, 290);
+        needle.sizeDelta = new Vector2(10, 265);
         needle.anchoredPosition = pivotPos;
         needle.localRotation = Quaternion.Euler(0, 0, 60);
         needleGo.GetComponent<Image>().color = new Color(1f, 0.3f, 0.2f);
@@ -483,18 +645,35 @@ public static class ShowcaseBuilder
         hubRt.anchoredPosition = pivotPos;
         hub.GetComponent<Image>().color = new Color(0.8f, 0.8f, 0.8f);
 
-        var readout = AddText(disp, "Readout", new Vector2(0.05f, 0.03f), new Vector2(0.95f, 0.25f), 120,
+        var rateText = AddText(disp, "Rate", new Vector2(0.03f, 0.19f), new Vector2(0.97f, 0.36f), 86,
             Color.white, TextAnchor.MiddleCenter);
-        readout.text = "0 CPS";
+        rateText.text = "0 µSv/h";
+        var doseText = AddText(disp, "Dose", new Vector2(0.03f, 0.03f), new Vector2(0.97f, 0.18f), 56,
+            Color.white, TextAnchor.MiddleCenter);
+        doseText.text = "DOSE 0 µSv";
+
+        var col = root.AddComponent<BoxCollider>();
+        col.center = new Vector3(0, -0.01f, 0.03f);
+        col.size = new Vector3(0.09f, 0.09f, 0.22f);
+        var rb = root.AddComponent<Rigidbody>();
+        rb.mass = 0.8f;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        rb.isKinematic = true;
 
         root.AddComponent<AudioSource>();
         var geiger = root.AddComponent<GeigerCounter>();
+        geiger.gripPoint = Grip(dev, new Vector3(0, -0.06f, -0.02f), new Vector3(0, -0.45f, 1f), new Vector3(0, 1f, 0.45f));
+        geiger.startKinematic = true;
+        geiger.locked = true;
         geiger.source = rad;
-        geiger.rig = rig;
         geiger.probeTip = tip;
         geiger.needle = needle;
-        geiger.readout = readout;
+        geiger.rateText = rateText;
+        geiger.doseText = doseText;
+        geiger.alarmText = alarm;
         geiger.led = led;
+        geiger.glowRenderers = new[] { body.GetComponent<Renderer>() };
         return geiger;
     }
 
@@ -557,7 +736,7 @@ public static class ShowcaseBuilder
         return ps;
     }
 
-    static void BuildVolume()
+    static Volume BuildVolume()
     {
         string path = GenDir + "/ShowcaseVolumeProfile.asset";
         AssetDatabase.DeleteAsset(path);
@@ -567,7 +746,12 @@ public static class ShowcaseBuilder
         bloom.intensity.Override(0.9f);
         bloom.threshold.Override(1f);
         var vig = profile.Add<Vignette>(true);
-        vig.intensity.Override(0.25f);
+        vig.intensity.Override(0.2f);
+        vig.color.Override(Color.black);
+        vig.smoothness.Override(1f);
+        var ca = profile.Add<ColorAdjustments>(true);
+        ca.saturation.Override(0f);
+        ca.postExposure.Override(0f);
         foreach (var c in profile.components) AssetDatabase.AddObjectToAsset(c, profile);
         EditorUtility.SetDirty(profile);
 
@@ -575,6 +759,13 @@ public static class ShowcaseBuilder
         var v = go.AddComponent<Volume>();
         v.isGlobal = true;
         v.sharedProfile = profile;
+        return v;
+    }
+
+    static void SetLayerRecursive(GameObject go, int layer)
+    {
+        go.layer = layer;
+        foreach (Transform c in go.transform) SetLayerRecursive(c.gameObject, layer);
     }
 
     // ================================================================= materials
@@ -598,6 +789,8 @@ public static class ShowcaseBuilder
         mBoard = Lit("BoardBack", new Color(0.06f, 0.07f, 0.09f));
         mHand = Lit("HandOrb", new Color(0.55f, 0.75f, 0.95f), null, 0.6f);
         mLine = SaveMat(new Material(Shader.Find("Sprites/Default")), "TeleportLine");
+        mAxeHandle = Lit("AxeHandle", new Color(0.75f, 0.08f, 0.06f), Color.black, 0.5f);
+        mGlass = TransparentLit("Glass", new Color(0.75f, 0.9f, 1f, 0.22f));
         mReticle = SaveMat(new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color")), "TeleportReticle");
         mReticle.SetColor("_BaseColor", Color.green);
         mSuit = Lit("RadSuit", new Color(0.95f, 0.75f, 0.1f), Color.black, 0.25f);
@@ -653,6 +846,26 @@ public static class ShowcaseBuilder
         return SaveMat(m, name);
     }
 
+    static Material TransparentLit(string name, Color color)
+    {
+        var shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+        var m = new Material(shader);
+        m.SetColor("_BaseColor", color);
+        m.SetColor("_Color", color);
+        m.SetFloat("_Smoothness", 0.95f);
+        m.SetFloat("_Surface", 1f);
+        m.SetFloat("_Blend", 0f);
+        m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m.SetFloat("_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+        m.SetFloat("_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m.SetFloat("_ZWrite", 0f);
+        m.SetOverrideTag("RenderType", "Transparent");
+        m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        return SaveMat(m, name);
+    }
+
     static Material SaveMat(Material m, string name)
     {
         string path = $"{GenDir}/{name}.mat";
@@ -663,6 +876,16 @@ public static class ShowcaseBuilder
     }
 
     // ================================================================= helpers
+
+    /// <summary>Adds a grip point: hand position on the item; forward = hand pointing direction, up = back of the hand.</summary>
+    static Transform Grip(Transform item, Vector3 localPos, Vector3 handForward, Vector3 handUp)
+    {
+        var g = new GameObject("GripPoint").transform;
+        g.SetParent(item, false);
+        g.localPosition = localPos;
+        g.localRotation = Quaternion.LookRotation(handForward, handUp);
+        return g;
+    }
 
     static GameObject Box(string name, Transform parent, Vector3 localPos, Vector3 scale, Material mat,
         bool collider = true, PrimitiveType type = PrimitiveType.Cube)

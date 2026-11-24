@@ -43,6 +43,8 @@ namespace RadiationShowcase
             return Mathf.Atan2(Vector3.Dot(v, fwd), Vector3.Dot(v, up)) * Mathf.Rad2Deg;
         }
 
+        public override bool CanForcePull => false;   // bolted to the wall
+
         public override void Grab(Transform hand, bool snapToHand)
         {
             holder = hand;

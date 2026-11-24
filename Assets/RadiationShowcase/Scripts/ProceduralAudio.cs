@@ -14,6 +14,28 @@ namespace RadiationShowcase
             return Notes(name, new[] { frequency }, duration, volume);
         }
 
+        /// <summary>Bright noise burst with tinkles — a glass-smash sound.</summary>
+        public static AudioClip Shatter(string name, float duration = 0.7f, float volume = 0.8f)
+        {
+            int n = Mathf.CeilToInt(SampleRate * duration);
+            var data = new float[n];
+            var rng = new System.Random(1234);
+            float prev = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float t = (float)i / SampleRate;
+                float white = (float)(rng.NextDouble() * 2.0 - 1.0);
+                float bright = white - prev;               // crude high-pass = crunchy glass
+                prev = white;
+                float env = Mathf.Exp(-t * 9f);
+                float tinkle = Mathf.Sin(2f * Mathf.PI * (3200f + 900f * Mathf.Sin(t * 37f)) * t) * Mathf.Exp(-t * 4f) * 0.25f;
+                data[i] = (bright * env * 0.8f + tinkle * (rng.NextDouble() < 0.02 ? 1f : 0.3f)) * volume;
+            }
+            var clip = AudioClip.Create(name, n, 1, SampleRate, false);
+            clip.SetData(data, 0);
+            return clip;
+        }
+
         /// <summary>Plays the given frequencies one after another, each lasting noteDuration.</summary>
         public static AudioClip Notes(string name, float[] frequencies, float noteDuration, float volume = 0.6f)
         {
