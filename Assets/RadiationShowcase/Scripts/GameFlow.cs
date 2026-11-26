@@ -49,6 +49,12 @@ namespace RadiationShowcase
         public float fadeDuration = 3f;
         public float deathRestartDelay = 12f;
 
+        [Header("Incident (start of the game)")]
+        [Tooltip("Seconds after Start when the explosion goes off (sound + camera shake)")]
+        public float explosionTime = 1f;
+        public float shakeDuration = 2f;
+        public float shakeAmplitude = 0.12f;
+
         [Header("Dose")]
         [Tooltip("Body dose (Sv) that kills the player. LD50 without treatment is about 3.5–5 Sv")]
         public float lethalDose = 4f;
@@ -61,15 +67,15 @@ namespace RadiationShowcase
         public Step[] steps =
         {
             new Step { id = "geiger", title = "หยิบ Geiger Counter จากตู้ฉุกเฉิน",
-                howTo = "หยิบขวานข้างตู้ (Grip) เหวี่ยงทุบกระจกให้แตก แล้วจับเครื่องถือไว้ ค่ารังสีดูได้จากเครื่องเท่านั้น" },
+                howTo = "ตู้แดงข้างจุดเริ่ม: หยิบขวานข้างตู้ (Grip) เหวี่ยงทุบกระจกให้แตก แล้วจับเครื่องถือไว้ ค่ารังสีดูได้จากเครื่องเท่านั้น" },
             new Step { id = "suit", title = "สวมชุดป้องกันรังสี",
-                howTo = "ไปที่ราวแขวนชุด กด Grip จับชุดค้างไว้ แล้วดึงมาแนบตัว" },
-            new Step { id = "fan", title = "ปิดพัดลมระบายอากาศ",
-                howTo = "จับหัวคันโยกสีแดงบนแผงสีฟ้า (Grip) แล้วโยกลงจนสุด" },
+                howTo = "ราวแขวนชุดอยู่หลังกองลังแถวแรก กด Grip จับชุดค้างไว้ แล้วดึงมาแนบตัว" },
             new Step { id = "pill", title = "กินยา Potassium Iodide (KI)",
-                howTo = "หยิบขวดยาสีส้มบนโต๊ะ แล้วยกขึ้นมาที่ปาก" },
-            new Step { id = "", title = "เดินฝ่าโซนรังสีไปที่ทางออก",
-                howTo = "รังสีรั่วอยู่ข้างประตู! ดูค่าจาก Geiger แล้วรีบผ่านวงแดง (กดสติ๊กซ้าย = วิ่ง) ไปที่ EXIT" },
+                howTo = "หยิบขวดยาสีส้มบนโต๊ะหลังกองลังแถวที่ 2 แล้วยกขึ้นมาที่ปาก" },
+            new Step { id = "fan", title = "ปิดพัดลมระบายอากาศ",
+                howTo = "แผงสีฟ้าข้างประตู EXIT: จับหัวคันโยกสีแดง (Grip) แล้วโยกลงจนสุด" },
+            new Step { id = "", title = "หนีไปที่ทางออก",
+                howTo = "รังสีรั่วจากช่องลมด้านหลังจุดเริ่ม และกำลังลามตามมา! EXIT อยู่สุดห้อง เดินซิกแซกอ้อมกองลังตามเส้นเขียว อย่าหยุดยืน (กดสติ๊กซ้าย = วิ่ง)" },
         };
 
         bool[] done;
@@ -80,7 +86,8 @@ namespace RadiationShowcase
         Coroutine endRoutine;
         const string DefaultStatus = "ค่ารังสีดูได้จาก Geiger Counter เท่านั้น  ยิ่งคลิกถี่ = ยิ่งใกล้จุดรั่ว  ถ้าตาเริ่มมืด = ได้รับรังสีมากแล้ว";
         AudioSource sfx;
-        AudioClip stepClip, winClip, errorClip, deathClip;
+        AudioClip stepClip, winClip, errorClip, deathClip, explosionClip;
+        bool exploded;
 
         void Awake()
         {
@@ -92,6 +99,7 @@ namespace RadiationShowcase
             winClip = ProceduralAudio.Notes("Win", new[] { 660f, 880f, 1100f, 1320f }, 0.14f, 0.5f);
             errorClip = ProceduralAudio.Notes("Error", new[] { 300f, 220f }, 0.15f, 0.5f);
             deathClip = ProceduralAudio.Notes("Death", new[] { 220f, 196f, 165f, 110f }, 0.35f, 0.5f);
+            explosionClip = ProceduralAudio.Explosion("Explosion");
             if (playerCamera != null) originalMask = playerCamera.cullingMask;
             ApplyThaiFont();
         }
@@ -113,6 +121,20 @@ namespace RadiationShowcase
         void Start() => ResetGame();
 
         public bool IsFinished => finished;
+        /// <summary>Seconds of play since "Start" / restart (stops in menus, pause and after the end).</summary>
+        public float Elapsed => elapsed;
+
+        // read-only state for the offline assistant
+        public bool IsStepDone(string id) => IsDone(id);
+        public bool AllPrepDone => PrepDone();
+        public string CurrentStepId
+        {
+            get
+            {
+                int i = FirstUndone();
+                return i < steps.Length ? steps[i].id : null;
+            }
+        }
 
         /// <summary>The default UI font has no Thai glyphs, so use a Windows Thai font at runtime.</summary>
         void ApplyThaiFont()
@@ -132,6 +154,7 @@ namespace RadiationShowcase
             for (int i = 0; i < done.Length; i++) done[i] = false;
             elapsed = 0f;
             finished = false;
+            exploded = false;
 
             if (rig != null) rig.ReleaseAll();
             if (glass != null) glass.ResetGlass();
@@ -260,7 +283,7 @@ namespace RadiationShowcase
             if (!died)
             {
                 SetEndText(false, dose, 0f);
-                yield break;                                     // wait for B / R
+                yield break;                                     // wait for the Restart / Quit buttons
             }
             for (float left = deathRestartDelay; left > 0f; left -= Time.deltaTime)
             {
@@ -312,6 +335,14 @@ namespace RadiationShowcase
         {
             if (finished) return;
             elapsed += Time.deltaTime;
+
+            // the incident: explosion 1 s after Start (siren at 4 s and gas at 5 s are handled by EmergencyAlarm / RadiationSource)
+            if (!exploded && elapsed >= explosionTime)
+            {
+                exploded = true;
+                sfx.PlayOneShot(explosionClip, 1f);
+                if (rig != null) rig.Shake(shakeDuration, shakeAmplitude);
+            }
 
             if (radiation != null && radiation.TotalDose >= lethalDose) { Die(); return; }
 

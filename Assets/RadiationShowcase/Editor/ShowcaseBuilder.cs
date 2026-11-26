@@ -24,7 +24,7 @@ public static class ShowcaseBuilder
 
     // materials
     static Material mFloor, mWall, mCeiling, mMetal, mDark, mYellow, mOrangeBtn, mBlue, mRed, mGreenPath,
-        mDanger, mVentGlow, mExit, mLamp, mBoard, mHand, mParticle, mSuit, mVisor, mPill, mCap, mLine, mReticle, mGlass, mAxeHandle;
+        mDanger, mVentGlow, mExit, mLamp, mBoard, mHand, mParticle, mSuit, mVisor, mPill, mCap, mLine, mReticle, mGlass, mAxeHandle, mBeacon, mCrate;
 
     [MenuItem("Tools/Radiation Showcase/Build VR Scene")]
     public static void Build()
@@ -47,16 +47,36 @@ public static class ShowcaseBuilder
 
         // ------------------------------------------------------------ room
         var env = new GameObject("Environment").transform;
-        Box("Floor", env, new Vector3(0, -0.05f, 0), new Vector3(8, 0.1f, 6), mFloor).AddComponent<TeleportArea>();
-        Box("Ceiling", env, new Vector3(0, 3.05f, 0), new Vector3(8, 0.1f, 6), mCeiling);
-        Box("Wall_North", env, new Vector3(0, 1.5f, 3.1f), new Vector3(8.4f, 3, 0.2f), mWall);
-        Box("Wall_South", env, new Vector3(0, 1.5f, -3.1f), new Vector3(8.4f, 3, 0.2f), mWall);
+        // 20 m long: x from -4 (start / preparation end) to +16 (exit end)
+        Box("Floor", env, new Vector3(6, -0.05f, 0), new Vector3(20, 0.1f, 6), mFloor).AddComponent<TeleportArea>();
+        Box("Ceiling", env, new Vector3(6, 3.05f, 0), new Vector3(20, 0.1f, 6), mCeiling);
+        Box("Wall_North", env, new Vector3(6, 1.5f, 3.1f), new Vector3(20.4f, 3, 0.2f), mWall);
+        Box("Wall_South", env, new Vector3(6, 1.5f, -3.1f), new Vector3(20.4f, 3, 0.2f), mWall);
         Box("Wall_West", env, new Vector3(-4.1f, 1.5f, 0), new Vector3(0.2f, 3, 6), mWall);
-        Box("Wall_East", env, new Vector3(4.1f, 1.5f, 0), new Vector3(0.2f, 3, 6), mWall);
-        Box("Stripe_N", env, new Vector3(0, 0.1f, 2.99f), new Vector3(8, 0.2f, 0.02f), mYellow, false);
-        Box("Stripe_S", env, new Vector3(0, 0.1f, -2.99f), new Vector3(8, 0.2f, 0.02f), mYellow, false);
+        Box("Wall_East", env, new Vector3(16.1f, 1.5f, 0), new Vector3(0.2f, 3, 6), mWall);
+        Box("Stripe_N", env, new Vector3(6, 0.1f, 2.99f), new Vector3(20, 0.2f, 0.02f), mYellow, false);
+        Box("Stripe_S", env, new Vector3(6, 0.1f, -2.99f), new Vector3(20, 0.2f, 0.02f), mYellow, false);
 
-        foreach (var x in new[] { -2f, 2f })
+        // zig-zag: four rows of tall crate stacks, openings alternate north / south / north / south
+        var crates = new GameObject("ZigZagCrates").transform;
+        var rnd = new System.Random(7);
+        foreach (var (rowX, gapNorth) in new[] { (5f, true), (7.5f, false), (10f, true), (12.5f, false) })
+        {
+            float[] zs = gapNorth ? new[] { -2.5f, -1.5f, -0.5f, 0.5f } : new[] { 2.5f, 1.5f, 0.5f, -0.5f };
+            foreach (var z in zs)
+            {
+                var stack = new GameObject("CrateStack").transform;
+                stack.SetParent(crates, false);
+                stack.position = new Vector3(rowX, 0, z);
+                stack.rotation = Quaternion.Euler(0, (float)(rnd.NextDouble() * 10 - 5), 0);
+                Box("Crate", stack, new Vector3(0, 0.6f, 0), new Vector3(1f, 1.2f, 1f), mCrate);
+                var top = Box("Crate", stack, new Vector3(0, 1.75f, 0), new Vector3(0.92f, 1.1f, 0.92f), mCrate);
+                top.transform.localRotation = Quaternion.Euler(0, (float)(rnd.NextDouble() * 16 - 8), 0);
+                Box("Band", stack, new Vector3(0, 0.95f, 0), new Vector3(1.02f, 0.08f, 1.02f), mYellow, false);
+            }
+        }
+
+        foreach (var x in new[] { -2f, 2f, 6f, 10f, 14f })
         {
             Box("Lamp", env, new Vector3(x, 2.98f, 0), new Vector3(1.2f, 0.04f, 0.3f), mLamp, false);
             var l = new GameObject("CeilingLight").AddComponent<Light>();
@@ -66,15 +86,15 @@ public static class ShowcaseBuilder
             l.color = new Color(1f, 0.95f, 0.85f); l.shadows = LightShadows.None;
         }
 
-        // ------------------------------------------------------------ vent + radiation (east wall, right next to the exit door)
-        // the group is turned 180° so its local +X points into the room
+        // ------------------------------------------------------------ vent + radiation (west wall, right behind the spawn point)
+        // local +X points into the room (east, toward the exit)
         var radGo = new GameObject("RadiationSource (Air Vent)");
-        radGo.transform.SetPositionAndRotation(new Vector3(3.9f, 0, -0.4f), Quaternion.Euler(0, 180, 0));
+        radGo.transform.SetPositionAndRotation(new Vector3(-3.9f, 0, -0.6f), Quaternion.identity);
         var rad = radGo.AddComponent<RadiationSource>();
         var vent = radGo.transform;
 
         Box("VentFrame", vent, new Vector3(-0.04f, 2.3f, 0), new Vector3(0.12f, 0.9f, 1.3f), mMetal);
-        Box("VentGlow", vent, new Vector3(0.025f, 2.3f, 0), new Vector3(0.01f, 0.7f, 1.1f), mVentGlow, false);
+        var ventGlow = Box("VentGlow", vent, new Vector3(0.025f, 2.3f, 0), new Vector3(0.01f, 0.7f, 1.1f), mVentGlow, false);
         var blades = new GameObject("FanBlades").transform;
         blades.SetParent(vent, false);
         blades.localPosition = new Vector3(0.04f, 2.3f, 0);
@@ -96,25 +116,29 @@ public static class ShowcaseBuilder
         glow.type = LightType.Point; glow.range = 6f; glow.intensity = 3f;
         glow.color = new Color(0.4f, 1f, 0.3f); glow.shadows = LightShadows.None;
 
-        var danger = Box("DangerZone", vent, new Vector3(0, 0.004f, 0), new Vector3(5.2f, 0.002f, 5.2f), mDanger, false, PrimitiveType.Cylinder);
         var ps = CreateParticles(vent);
 
-        rad.dangerRadius = 2.6f;
-        rad.range = 7f;
+        // the contamination starts small behind the player and chases them down the room toward the exit
+        rad.maxRateSvPerHour = 2000f;
+        rad.falloffPower = 4f;
+        rad.range = 22f;
+        rad.dangerRadius = 11f;
+        rad.startSize = 0.1f;
+        rad.spreadDuration = 40f;
         rad.particles = ps;
         rad.glowLight = glow;
+        rad.ventGlow = ventGlow.GetComponent<Renderer>();
         rad.fanBlades = blades;
-        rad.dangerFloor = danger.GetComponent<Renderer>();
 
-        // ------------------------------------------------------------ Step 1: radiation suit on a rack (west wall)
+        // ------------------------------------------------------------ Step 2: radiation suit on a rack (behind crate row 1, south wall)
         var rack = new GameObject("Step1_SuitRack").transform;
-        rack.SetPositionAndRotation(new Vector3(-3.75f, 0, -1.0f), Quaternion.Euler(0, 90, 0)); // local +Z = into the room
+        rack.SetPositionAndRotation(new Vector3(6.2f, 0, -2.75f), Quaternion.identity); // south wall, local +Z = into the room
         Box("Post_L", rack, new Vector3(-0.5f, 1.0f, -0.1f), new Vector3(0.05f, 2.0f, 0.05f), mMetal);
         Box("Post_R", rack, new Vector3(0.5f, 1.0f, -0.1f), new Vector3(0.05f, 2.0f, 0.05f), mMetal);
         Box("Bar", rack, new Vector3(0, 2.0f, -0.1f), new Vector3(1.05f, 0.04f, 0.04f), mMetal);
         Box("Hanger", rack, new Vector3(0, 1.96f, 0.05f), new Vector3(0.02f, 0.1f, 0.02f), mDark, false);
         Label("RackSign", rack, new Vector3(0, 2.3f, 0), Quaternion.Euler(0, 180, 0), // face the player (who looks toward the wall)
-            "STEP 1\nชุดป้องกันรังสี", 60, Color.black, new Vector2(900, 240), 0.001f, new Color(0.95f, 0.75f, 0.1f, 0.95f));
+            "STEP 2\nชุดป้องกันรังสี", 60, Color.black, new Vector2(900, 240), 0.001f, new Color(0.95f, 0.75f, 0.1f, 0.95f));
 
         var suitGo = new GameObject("RadiationSuit (grab + pull to chest)");
         suitGo.transform.SetPositionAndRotation(rack.TransformPoint(0, 1.3f, 0.05f), rack.rotation);
@@ -140,9 +164,9 @@ public static class ShowcaseBuilder
         suit.startKinematic = true;
         suit.actionId = "suit";
 
-        // ------------------------------------------------------------ Step 2: fan lever (north wall)
-        var sw = new GameObject("Step2_FanLever").transform;
-        sw.position = new Vector3(0.6f, 0, 2.95f);
+        // ------------------------------------------------------------ Step 4: fan lever (east wall, next to the exit)
+        var sw = new GameObject("Step4_FanLever").transform;
+        sw.SetPositionAndRotation(new Vector3(15.95f, 0, -1.2f), Quaternion.Euler(0, 90, 0)); // panel front (local -Z) faces west, into the room
         Box("SwitchPanel", sw, new Vector3(0, 1.3f, 0), new Vector3(0.6f, 0.8f, 0.08f), mBlue);
         Box("Slot", sw, new Vector3(0, 1.15f, -0.045f), new Vector3(0.06f, 0.5f, 0.01f), mDark, false);
         var pivot = new GameObject("LeverPivot").transform;
@@ -159,11 +183,11 @@ public static class ShowcaseBuilder
         var fanLabel = Label("FanStatus", sw, new Vector3(0.45f, 1.3f, -0.05f), Quaternion.identity,
             "พัดลม\nON", 60, Color.white, new Vector2(260, 200), 0.001f, new Color(0, 0, 0, 0.8f));
         Label("LeverSign", sw, new Vector3(0, 1.98f, -0.05f), Quaternion.identity,
-            "STEP 2\nจับคันโยกแล้วโยกลง = ปิดพัดลม", 52, Color.white, new Vector2(1000, 240), 0.001f, new Color(0.05f, 0.15f, 0.35f, 0.9f));
+            "STEP 4\nจับคันโยกแล้วโยกลง = ปิดพัดลม", 52, Color.white, new Vector2(1000, 240), 0.001f, new Color(0.05f, 0.15f, 0.35f, 0.9f));
 
-        // ------------------------------------------------------------ Step 3: radiation blocker pills on a table (south wall)
+        // ------------------------------------------------------------ Step 3: radiation blocker pills on a table (behind crate row 2, north wall)
         var table = new GameObject("Step3_PillTable").transform;
-        table.position = new Vector3(0.8f, 0, -2.45f);
+        table.SetPositionAndRotation(new Vector3(8.75f, 0, 2.45f), Quaternion.Euler(0, 180, 0)); // local +Z = into the room
         Box("TableTop", table, new Vector3(0, 0.8f, 0), new Vector3(0.9f, 0.05f, 0.5f), mMetal);
         foreach (var lx in new[] { -0.4f, 0.4f })
             foreach (var lz in new[] { -0.2f, 0.2f })
@@ -174,7 +198,7 @@ public static class ShowcaseBuilder
 
         var pillGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         pillGo.name = "PillBottle (grab + bring to mouth)";
-        pillGo.transform.position = new Vector3(0.8f, 0.886f, -2.35f);
+        pillGo.transform.SetPositionAndRotation(table.TransformPoint(0, 0.886f, 0.1f), table.rotation);
         pillGo.transform.localScale = new Vector3(0.06f, 0.06f, 0.06f);
         pillGo.GetComponent<Renderer>().sharedMaterial = mPill;
         var cap = Box("Cap", pillGo.transform, new Vector3(0, 1.15f, 0), new Vector3(1.05f, 0.2f, 1.05f), mCap, false, PrimitiveType.Cylinder);
@@ -189,36 +213,37 @@ public static class ShowcaseBuilder
         pill.actionId = "pill";
         pill.glowRenderers = new[] { pillGo.GetComponent<Renderer>(), cap.GetComponent<Renderer>() };
 
-        // ------------------------------------------------------------ Exit (east wall, inside the leak zone)
+        // ------------------------------------------------------------ Exit (east wall, far end of the room)
         var exitGrp = new GameObject("Exit").transform;
-        exitGrp.position = new Vector3(3.95f, 0, 1.8f);
+        exitGrp.position = new Vector3(15.95f, 0, 1.8f);
         Box("Door", exitGrp, new Vector3(0, 1.05f, 0), new Vector3(0.06f, 2.1f, 1.1f), mExit);
         Box("Frame_L", exitGrp, new Vector3(-0.02f, 1.1f, -0.6f), new Vector3(0.1f, 2.2f, 0.1f), mMetal);
         Box("Frame_R", exitGrp, new Vector3(-0.02f, 1.1f, 0.6f), new Vector3(0.1f, 2.2f, 0.1f), mMetal);
         Box("Frame_T", exitGrp, new Vector3(-0.02f, 2.2f, 0), new Vector3(0.1f, 0.1f, 1.3f), mMetal);
         Label("ExitSign", exitGrp, new Vector3(-0.08f, 2.5f, 0), Quaternion.Euler(0, 90, 0),
             "EXIT  /  ทางออก", 80, new Color(0.35f, 1f, 0.5f), new Vector2(1100, 200), 0.001f, new Color(0, 0.1f, 0.03f, 0.9f));
-        Box("ExitPad", env, new Vector3(3.35f, 0.008f, 1.8f), new Vector3(1.2f, 0.01f, 1.4f), mGreenPath, false);
+        Box("ExitPad", env, new Vector3(15.35f, 0.008f, 1.8f), new Vector3(1.2f, 0.01f, 1.4f), mGreenPath, false);
         var exitPoint = new GameObject("ExitPoint").transform;
-        exitPoint.position = new Vector3(3.3f, 0, 1.8f);
+        exitPoint.position = new Vector3(15.3f, 0, 1.8f);
         var exitLight = new GameObject("ExitLight").AddComponent<Light>();
-        exitLight.transform.position = new Vector3(3.5f, 2.6f, 1.8f);
+        exitLight.transform.position = new Vector3(15.5f, 2.6f, 1.8f);
         exitLight.type = LightType.Point; exitLight.range = 4f; exitLight.intensity = 1.5f;
         exitLight.color = new Color(0.3f, 1f, 0.45f); exitLight.shadows = LightShadows.None;
 
-        // ------------------------------------------------------------ guide path (green): case -> suit -> lever -> pills -> through the leak -> exit
+        // ------------------------------------------------------------ guide path (green): axe + case -> suit -> pills -> lever -> exit
         var path = new GameObject("GuidePath").transform;
         var pts = new[]
         {
-            new Vector3(-2.4f, 0, -0.6f), new Vector3(-3.2f, 0, 0.8f), new Vector3(-3.0f, 0, -1.0f), new Vector3(0.6f, 0, 2.3f),
-            new Vector3(0.8f, 0, -1.9f), new Vector3(3.3f, 0, 1.8f)
+            new Vector3(-2.4f, 0, -0.6f), new Vector3(-0.9f, 0, -2.2f), new Vector3(-1.8f, 0, -2.2f), new Vector3(5f, 0, 2.1f),
+            new Vector3(6.2f, 0, -2.0f), new Vector3(7.5f, 0, -2.1f), new Vector3(8.5f, 0, -1.8f), new Vector3(8.75f, 0, 1.7f),
+            new Vector3(10f, 0, 2.1f), new Vector3(12.5f, 0, -2.1f), new Vector3(15.2f, 0, -1.2f), new Vector3(15.3f, 0, 1.8f)
         };
         for (int i = 0; i < pts.Length - 1; i++) Strip(path, pts[i], pts[i + 1], 0.12f, mGreenPath);
 
         // ------------------------------------------------------------ start point
         var start = new GameObject("StartPoint").transform;
         start.position = new Vector3(-2.4f, 0, -0.6f);
-        start.rotation = Quaternion.identity;
+        start.rotation = Quaternion.Euler(0, 90, 0);   // facing east down the room: the leaking vent is right behind you
 
         // ------------------------------------------------------------ guide board (north wall, in front of the start)
         var boardGrp = new GameObject("GuideBoard").transform;
@@ -236,8 +261,8 @@ public static class ShowcaseBuilder
         AddText(boardCanvas, "Controls", new Vector2(0.04f, 0.01f), new Vector2(0.74f, 0.17f), 26,
             new Color(0.75f, 0.75f, 0.75f), TextAnchor.MiddleLeft).text =
             "VR (แบบ H3VR): สติ๊กซ้าย = เดิน, กดสติ๊กซ้าย = เปิด/ปิดวิ่ง | สติ๊กขวาซ้าย-ขวา = หมุน 45° | สติ๊กขวาดันขึ้น = เล็งวาร์ป ปล่อย = วาร์ป\n" +
-            "Grip ค้าง = จับ/ถือ | ชี้ของไกล + Trigger + Grip = ดูดของเข้ามือ | เอามือจิ้มปุ่ม = กด | Y = คู่มือ | B = รีเซ็ต | Menu = หยุดเกม\n" +
-            "PC: คลิกล็อกเมาส์ | WASD, Shift = วิ่ง | คลิกขวาค้าง = วาร์ป | คลิกซ้ายค้าง = จับ | F = เข้าตัว/ปาก | Space = เหวี่ยงขวาน | G = วาง Geiger | H = คู่มือ | R = รีเซ็ต | Esc = หยุดเกม";
+            "Grip ค้าง = จับ/ถือ | ชี้ของไกล + Trigger + Grip = ดูดของเข้ามือ | เอามือจิ้มปุ่ม = กด | X = ผู้ช่วย AI | Y = คู่มือ | Menu = หยุดเกม / เริ่มใหม่\n" +
+            "PC: คลิกล็อกเมาส์ | WASD, Shift = วิ่ง | คลิกขวาค้าง = วาร์ป | คลิกซ้ายค้าง = จับ | F = เข้าตัว/ปาก | Space = เหวี่ยงขวาน | G = วาง Geiger | Tab = ผู้ช่วย AI | H = คู่มือ | R = รีเซ็ต | Esc = หยุดเกม";
         var boardResetGo = Box("Button_Reset", boardGrp, new Vector3(0.75f, 1.12f, -0.05f), new Vector3(0.32f, 0.14f, 0.06f), mRed);
         var boardReset = boardResetGo.AddComponent<WorldButton>();
         boardReset.id = "reset";
@@ -245,9 +270,9 @@ public static class ShowcaseBuilder
         Label("ResetLabel", boardGrp, new Vector3(0.75f, 1.12f, -0.085f), Quaternion.identity,
             "RESET", 70, Color.white, new Vector2(320, 140), 0.001f);
 
-        // ------------------------------------------------------------ emergency case with the Geiger counter (west wall)
+        // ------------------------------------------------------------ emergency case with the Geiger counter (south wall, next to the spawn)
         var caseGrp = new GameObject("Step1_EmergencyCase (break the glass)").transform;
-        caseGrp.SetPositionAndRotation(new Vector3(-3.92f, 0, 0.8f), Quaternion.Euler(0, 90, 0)); // local +Z = into the room
+        caseGrp.SetPositionAndRotation(new Vector3(-1.8f, 0, -2.92f), Quaternion.identity); // local +Z = into the room
         Box("CaseBack", caseGrp, new Vector3(0, 1.3f, 0), new Vector3(0.7f, 0.62f, 0.04f), mRed);
         Box("Frame_L", caseGrp, new Vector3(-0.33f, 1.3f, 0.14f), new Vector3(0.04f, 0.62f, 0.28f), mRed);
         Box("Frame_R", caseGrp, new Vector3(0.33f, 1.3f, 0.14f), new Vector3(0.04f, 0.62f, 0.28f), mRed);
@@ -265,7 +290,7 @@ public static class ShowcaseBuilder
 
         // ------------------------------------------------------------ fire axe on the wall next to the case
         var axeMount = new GameObject("FireAxeMount").transform;
-        axeMount.SetPositionAndRotation(new Vector3(-3.92f, 0, 1.7f), Quaternion.Euler(0, 90, 0));
+        axeMount.SetPositionAndRotation(new Vector3(-0.9f, 0, -2.92f), Quaternion.identity);
         Box("MountPlate", axeMount, new Vector3(0, 1.3f, 0), new Vector3(0.35f, 0.95f, 0.02f), mRed, false);
         Label("AxeSign", axeMount, new Vector3(0, 1.9f, 0.02f), Quaternion.Euler(0, 180, 0),
             "FIRE AXE\nขวานดับเพลิง", 44, Color.white, new Vector2(420, 160), 0.001f, new Color(0.6f, 0.05f, 0.05f, 0.95f));
@@ -367,6 +392,20 @@ public static class ShowcaseBuilder
         flow.endPanel = endPanel.gameObject;
         flow.endText = endText;
 
+        // ------------------------------------------------------------ emergency alarm: rotating red beacons + siren
+        BuildEmergencyAlarm(rad, flow);
+
+        // ------------------------------------------------------------ offline assistant tablet (left wrist / bottom-left on desktop)
+        var assistant = flowGo.AddComponent<RadiationAssistant>();
+        assistant.rig = rig;
+        assistant.flow = flow;
+        assistant.radiation = rad;
+        assistant.geiger = geiger;
+        assistant.axe = axe;
+        assistant.glass = glass;
+        assistant.exitPoint = exitPoint;
+        BuildAssistantTablet(assistant);
+
         // ------------------------------------------------------------ pause menu (Menu button / Esc)
         var pause = flowGo.AddComponent<PauseMenu>();
         pause.rig = rig;
@@ -380,6 +419,91 @@ public static class ShowcaseBuilder
         AddSceneToBuildSettings();
         AssetDatabase.SaveAssets();
         Debug.Log($"[Radiation Showcase] Scene built: {ScenePath}");
+    }
+
+    // ================================================================= emergency alarm
+
+    static void BuildEmergencyAlarm(RadiationSource rad, GameFlow flow)
+    {
+        var alarmGo = new GameObject("EmergencyAlarm (beacons + siren)");
+        var alarm = alarmGo.AddComponent<EmergencyAlarm>();
+        alarm.radiation = rad;
+        alarm.flow = flow;
+
+        var rotors = new List<Transform>();
+        var lights = new List<Light>();
+        var domes = new List<Renderer>();
+        // one beacon high on the north wall, one on the south wall
+        foreach (var (bPos, bYaw) in new[] { (new Vector3(-0.8f, 2.7f, 2.86f), 180f), (new Vector3(6f, 2.7f, -2.86f), 0f), (new Vector3(12f, 2.7f, 2.86f), 180f) })
+        {
+            var b = new GameObject("Beacon").transform;
+            b.SetParent(alarmGo.transform, false);
+            b.SetPositionAndRotation(bPos, Quaternion.Euler(0, bYaw, 0));
+            Box("Bracket", b, new Vector3(0, -0.03f, -0.06f), new Vector3(0.22f, 0.04f, 0.26f), mDark, false);
+            Box("Base", b, Vector3.zero, new Vector3(0.18f, 0.06f, 0.18f), mDark, false);
+            var dome = Box("Dome", b, new Vector3(0, 0.1f, 0), new Vector3(0.16f, 0.18f, 0.16f), mBeacon, false, PrimitiveType.Sphere);
+            domes.Add(dome.GetComponent<Renderer>());
+
+            var rotor = new GameObject("Rotor").transform;
+            rotor.SetParent(b, false);
+            rotor.localPosition = new Vector3(0, 0.1f, 0);
+            rotors.Add(rotor);
+            foreach (var yaw in new[] { 0f, 180f })
+            {
+                var l = new GameObject("Beam").AddComponent<Light>();
+                l.transform.SetParent(rotor, false);
+                l.transform.localRotation = Quaternion.Euler(12f, yaw, 0);
+                l.type = LightType.Spot;
+                l.spotAngle = 45f;
+                l.range = 9f;
+                l.intensity = 8f;
+                l.color = new Color(1f, 0.1f, 0.05f);
+                l.shadows = LightShadows.None;
+                lights.Add(l);
+            }
+        }
+        alarm.rotors = rotors.ToArray();
+        alarm.beamLights = lights.ToArray();
+        alarm.domes = domes.ToArray();
+    }
+
+    // ================================================================= offline assistant tablet
+
+    static void BuildAssistantTablet(RadiationAssistant assistant)
+    {
+        // 900 x 1000 px at 0.00035 m/px = 31.5 x 35 cm tablet
+        var tab = MakeCanvas("AssistantTablet (offline AI)", null, new Vector3(0, 1.2f, 0), Quaternion.identity,
+            new Vector2(900, 1000), 0.00035f, new Color(0.02f, 0.05f, 0.08f, 0.9f));
+
+        AddText(tab, "Title", new Vector2(0.04f, 0.9f), new Vector2(0.96f, 0.98f), 46,
+            new Color(0.4f, 0.9f, 1f), TextAnchor.MiddleLeft).text = "ผู้ช่วย AI <size=28><color=#88AABB>(ออฟไลน์ · X / Tab = พับเก็บ)</color></size>";
+        var live = AddText(tab, "LiveAdvice", new Vector2(0.04f, 0.62f), new Vector2(0.96f, 0.89f), 38,
+            Color.white, TextAnchor.UpperLeft);
+        live.text = "...";
+        var answer = AddText(tab, "Answer", new Vector2(0.04f, 0.33f), new Vector2(0.96f, 0.61f), 32,
+            new Color(0.85f, 0.9f, 0.95f), TextAnchor.UpperLeft);
+        answer.text = "<color=#AAAAAA>แตะปุ่มด้านล่างเพื่อถาม (PC: กด 1–4)  ·  X / Tab = พับเก็บ</color>";
+
+        var questions = new[]
+        {
+            ("ask_next", "1  ต้องทำอะไรต่อ?", -220f, -260f),
+            ("ask_safe", "2  จุดนี้ปลอดภัยไหม?", 220f, -260f),
+            ("ask_gear", "3  อุปกรณ์ของฉัน?", -220f, -410f),
+            ("ask_body", "4  ร่างกายฉันเป็นไง?", 220f, -410f),
+        };
+        foreach (var (qId, qLabel, qx, qy) in questions)
+        {
+            var qGo = Box("Ask_" + qId, tab, new Vector3(qx, qy, -15), new Vector3(420, 120, 30), mBlue);
+            var qBtn = qGo.AddComponent<WorldButton>();
+            qBtn.id = qId;
+            qBtn.emissionColor = new Color(0.3f, 0.7f, 1f);
+            Label("Label_" + qId, tab, new Vector3(qx, qy, -35), Quaternion.identity,
+                qLabel, 36, Color.white, new Vector2(420, 120), 1f);
+        }
+
+        assistant.tablet = tab;
+        assistant.liveText = live;
+        assistant.answerText = answer;
     }
 
     // ================================================================= pause menu
@@ -488,7 +612,7 @@ public static class ShowcaseBuilder
             $"{H}รวมกัน{E}: ชุด + ยา = ได้รับรังสีเหลือ 20% (0.4 x 0.5)  และการปิดพัดลมยังลดความแรงของจุดรั่วลงอีก 70%\n\n" +
 
             $"{H}4) หลัก เวลา - ระยะทาง - ที่กำบัง{E}\n" +
-            "• เวลา: อยู่ในโซนนานเท่าไหร่ ก็ได้รับรังสีมากเท่านั้น → รีบผ่านวงแดง (กดสติ๊กซ้ายเพื่อวิ่ง)\n" +
+            "• เวลา: อยู่ในโซนนานเท่าไหร่ ก็ได้รับรังสีมากเท่านั้น → อย่าหยุดยืน รีบหนีรังสีที่ลามตามมาไปที่ประตู (กดสติ๊กซ้ายเพื่อวิ่ง)\n" +
             "• ระยะทาง: ยิ่งห่างจุดรั่ว รังสียิ่งลดลงเร็ว (แหล่งรังสีแบบจุด ห่างขึ้น 2 เท่า เหลือประมาณ 1/4)\n" +
             "• ที่กำบัง: ผนังหรือวัสดุหนาที่อยู่ระหว่างตัวเรากับแหล่งรังสีช่วยลดรังสีได้\n\n" +
 
@@ -690,7 +814,7 @@ public static class ShowcaseBuilder
 
         var main = ps.main;
         main.loop = true;
-        main.playOnAwake = true;
+        main.playOnAwake = false;   // RadiationSource starts it when the leak begins
         main.duration = 5f;
         main.startLifetime = new ParticleSystem.MinMaxCurve(3.5f, 5.5f);
         main.startSpeed = 1f;
@@ -790,6 +914,8 @@ public static class ShowcaseBuilder
         mHand = Lit("HandOrb", new Color(0.55f, 0.75f, 0.95f), null, 0.6f);
         mLine = SaveMat(new Material(Shader.Find("Sprites/Default")), "TeleportLine");
         mAxeHandle = Lit("AxeHandle", new Color(0.75f, 0.08f, 0.06f), Color.black, 0.5f);
+        mBeacon = Lit("BeaconRed", new Color(0.8f, 0.05f, 0.05f), Color.black, 0.85f);
+        mCrate = Lit("Crate", new Color(0.45f, 0.33f, 0.2f), null, 0.15f);
         mGlass = TransparentLit("Glass", new Color(0.75f, 0.9f, 1f, 0.22f));
         mReticle = SaveMat(new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color")), "TeleportReticle");
         mReticle.SetColor("_BaseColor", Color.green);

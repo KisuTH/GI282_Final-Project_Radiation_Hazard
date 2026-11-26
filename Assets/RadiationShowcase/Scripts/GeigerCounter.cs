@@ -106,7 +106,9 @@ namespace RadiationShowcase
         protected override void Update()
         {
             base.Update();
-            vol = volume;
+            // the game has ended (dose frozen for the report): fade the clicks out; back to full on restart
+            bool gameOver = source != null && !source.accumulate;
+            vol = gameOver ? Mathf.MoveTowards(vol, 0f, volume * Time.deltaTime) : volume;
 
             float ambient = 0f;
             if (source != null)

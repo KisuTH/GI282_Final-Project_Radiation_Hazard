@@ -15,11 +15,11 @@ namespace RadiationShowcase
     ///   Right stick L/R      = snap turn 45°
     ///   Right stick UP       = aim teleport arc from the right hand, let go of the stick = teleport
     ///   Grip (hold)          = grab / hold an object, release Grip = let go (throw by swinging)
-    ///   Trigger + Grip       = Bonelab-style force grab: point at an item up to ~4 m away and it flies into the hand
+    ///   Trigger + Grip       = Bonelab-style force grab: point at an item up to ~2 m away and it flies into the hand
     ///                          (hold Trigger alone to see which item you're pointing at — it glows)
     ///   Poke with fingertip  = press 3D buttons
     ///   Y (left hand)        = show / hide the handbook
-    ///   B (right hand)       = reset
+    ///   Restart              = the "เริ่มใหม่" button in the pause menu (Menu button)
     /// Desktop (testing): click Game view to lock mouse, mouse = look, WASD = walk, Shift = toggle sprint,
     ///   hold Right Mouse = aim teleport, release = teleport,
     ///   hold Left Mouse = grab / press what the crosshair points at, hold F = bring held item to your body/mouth,
@@ -58,7 +58,7 @@ namespace RadiationShowcase
         public float grabRadius = 0.09f;
         public float desktopReach = 2.5f;
         [Tooltip("Force grab (Trigger + Grip): how far you can pull items from")]
-        public float forceGrabRange = 4f;
+        public float forceGrabRange = 1.2f;
         [Tooltip("Force grab: aim assist radius of the pointing ray")]
         public float forceGrabRadius = 0.12f;
         [Tooltip("Force grab: how fast the item flies to the hand (m/s)")]
@@ -73,6 +73,34 @@ namespace RadiationShowcase
         public float mouseSensitivity = 0.1f;
 
         public event Action ResetRequested;
+
+        // ---------------------------------------------------------------- camera shake
+        float shakeTime, shakeDuration, shakeAmplitude;
+
+        /// <summary>Shake the view (explosion). VR gets a gentler, position-only shake to avoid motion sickness.</summary>
+        public void Shake(float duration, float amplitude)
+        {
+            shakeDuration = shakeTime = duration;
+            shakeAmplitude = amplitude;
+        }
+
+        Vector3 ShakeOffset()
+        {
+            if (shakeTime <= 0f) return Vector3.zero;
+            float k = shakeTime / shakeDuration;                    // fades out
+            float amp = shakeAmplitude * k * (VRActive ? 0.5f : 1f);
+            float t = Time.time * 35f;
+            return new Vector3(Mathf.PerlinNoise(t, 0.1f) - 0.5f, Mathf.PerlinNoise(0.3f, t) - 0.5f, Mathf.PerlinNoise(t, t) - 0.5f) * 2f * amp;
+        }
+
+        Quaternion ShakeRotation()
+        {
+            if (shakeTime <= 0f || VRActive) return Quaternion.identity;   // never rotate the view in VR
+            float k = shakeTime / shakeDuration;
+            float t = Time.time * 30f;
+            return Quaternion.Euler((Mathf.PerlinNoise(t, 5f) - 0.5f) * 12f * k, (Mathf.PerlinNoise(9f, t) - 0.5f) * 12f * k,
+                                    (Mathf.PerlinNoise(t, 3f) - 0.5f) * 6f * k);
+        }
         public bool VRActive { get; private set; }
 
         public Vector3 FlatForward
@@ -136,7 +164,7 @@ namespace RadiationShowcase
             moveAction = Make("Move", "Vector2", "<XRController>{LeftHand}/thumbstick", "<XRController>{LeftHand}/{Primary2DAxis}");
             turnAction = Make("Turn", "Vector2", "<XRController>{RightHand}/thumbstick", "<XRController>{RightHand}/{Primary2DAxis}");
             sprintAction = MakeButton("Sprint", "<XRController>{LeftHand}/thumbstickClicked", "<XRController>{LeftHand}/{Primary2DAxisClick}");
-            resetAction = MakeButton("Reset", "<XRController>{RightHand}/secondaryButton", "<XRController>{RightHand}/{SecondaryButton}", "<Keyboard>/r");
+            resetAction = MakeButton("Reset", "<Keyboard>/r");   // VR: restart from the pause menu instead
             handbookAction = MakeButton("Handbook", "<XRController>{LeftHand}/secondaryButton", "<XRController>{LeftHand}/{SecondaryButton}", "<Keyboard>/h");
 
             left = new Hand
@@ -290,6 +318,7 @@ namespace RadiationShowcase
         void Update()
         {
             VRActive = XRSettings.isDeviceActive;
+            if (shakeTime > 0f) shakeTime -= Time.deltaTime;
 
             if (VRActive) { SetupTrackingOrigin(); UpdateTrackedPoses(); }
             else UpdateDesktopLookAndHand();
@@ -391,7 +420,8 @@ namespace RadiationShowcase
 
         void UpdateTrackedPoses()
         {
-            cameraOffset.localPosition = new Vector3(0f, floorOffset, 0f);
+            cameraOffset.localPosition = new Vector3(0f, floorOffset, 0f) + ShakeOffset();
+            cameraOffset.localRotation = Quaternion.identity;
             if (headPos.controls.Count > 0) head.localPosition = headPos.ReadValue<Vector3>();
             if (headRot.controls.Count > 0) head.localRotation = headRot.ReadValue<Quaternion>();
             if (lPos.controls.Count > 0) { leftHand.localPosition = lPos.ReadValue<Vector3>(); leftHand.localRotation = lRot.ReadValue<Quaternion>(); }
@@ -400,7 +430,8 @@ namespace RadiationShowcase
 
         void UpdateDesktopLookAndHand()
         {
-            cameraOffset.localPosition = new Vector3(0f, desktopEyeHeight, 0f);
+            cameraOffset.localPosition = new Vector3(0f, desktopEyeHeight, 0f) + ShakeOffset();
+            cameraOffset.localRotation = ShakeRotation();
             head.localPosition = Vector3.zero;
 
             var mouse = Mouse.current;

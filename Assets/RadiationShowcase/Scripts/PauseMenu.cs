@@ -39,7 +39,7 @@ namespace RadiationShowcase
         }
 
         InputAction pauseAction;
-        bool mainOpen;
+        bool mainOpen, mainPlaced;
 
         void Awake()
         {
@@ -65,14 +65,23 @@ namespace RadiationShowcase
             Time.timeScale = 0f;
             AudioListener.pause = true;
             mainPanel.SetActive(true);
-            PlaceInFront(mainPanel.transform, 1f);
+            mainPlaced = false;
+            if (rig != null && !rig.VRActive) { PlaceInFront(mainPanel.transform, 1f); mainPlaced = true; }
         }
 
         void LateUpdate()
         {
-            // the headset may only start tracking a moment after Play, so keep the title screen in front of the player
-            if (mainOpen && mainPanel != null && rig != null && rig.VRActive)
-                PlaceInFront(mainPanel.transform, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 4f));
+            // the headset only starts tracking a moment after Play: place the title screen ONCE, as soon as the
+            // head pose is real, then leave it fixed in the world
+            if (mainOpen && !mainPlaced && mainPanel != null && rig != null)
+            {
+                bool tracking = !rig.VRActive || rig.head.localPosition.sqrMagnitude > 0.01f;
+                if (tracking)
+                {
+                    PlaceInFront(mainPanel.transform, 1f);
+                    mainPlaced = true;
+                }
+            }
         }
 
         void PlaceInFront(Transform t, float k)
